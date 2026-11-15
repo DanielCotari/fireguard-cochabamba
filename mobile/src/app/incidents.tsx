@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { ActionButton, Field, MutedText, Notice, Panel, WorkspacePage } from '@/components/workspace-ui';
+import { StatusTimeline, useAtlasTheme } from '@/components/atlas-ui';
 import { useAuth } from '@/lib/auth-context';
 import {
   callOperation,
@@ -12,6 +13,7 @@ import {
   subscribeReportsForReview,
   type OperationalDocument,
 } from '@/lib/operations-service';
+import { dimensions, radii, spacing, typography } from '@/theme/tokens';
 
 const INCIDENT_STATUS: Record<string, string> = {
   under_evaluation: 'En evaluación',
@@ -21,6 +23,16 @@ const INCIDENT_STATUS: Record<string, string> = {
   in_intervention: 'En intervención',
   monitoring: 'En vigilancia',
   closed: 'Cerrado',
+};
+
+const INCIDENT_STAGE: Record<string, string> = {
+  under_evaluation: 'Evaluación',
+  pending_assignment: 'Asignación',
+  assigned: 'Asignación',
+  en_route: 'Desplazamiento',
+  in_intervention: 'Intervención',
+  monitoring: 'Vigilancia',
+  closed: 'Cierre',
 };
 
 type BrigadeRoster = {
@@ -36,6 +48,7 @@ function requestKey(action: string, subject: string) {
 
 export default function IncidentsScreen() {
   const { user, role } = useAuth();
+  const { colors } = useAtlasTheme();
   const [areaIds, setAreaIds] = useState<string[]>([]);
   const [brigadeIds, setBrigadeIds] = useState<string[]>([]);
   const [reports, setReports] = useState<OperationalDocument[]>([]);
@@ -226,9 +239,9 @@ export default function IncidentsScreen() {
             const id = typeof report.id === 'string' ? report.id : '';
             const status = typeof report.status === 'string' ? report.status : 'received';
             return (
-              <View key={id} style={styles.item}>
-                <Text style={styles.itemTitle}>Reporte · {status}</Text>
-                <Text style={styles.copy}>{typeof report.description === 'string' ? report.description : ''}</Text>
+              <View key={id} style={[styles.item, { borderTopColor: colors.line }]}>
+                <Text style={[styles.itemTitle, { color: colors.ink }]}>Reporte · {status}</Text>
+                <Text style={[styles.copy, { color: colors.inkMuted }]}>{typeof report.description === 'string' ? report.description : ''}</Text>
                 <MutedText>
                   Contraste satelital: {report.satelliteMatch === 'match_found' ? 'coincidencia encontrada' : report.satelliteMatch === 'no_match_found' ? 'sin coincidencia' : 'pendiente'}.
                   Ningún resultado confirma ni descarta por sí solo un incendio.
@@ -280,23 +293,24 @@ export default function IncidentsScreen() {
                   ? ['in_intervention', 'closed']
                   : [];
           return (
-            <View key={id} style={styles.item}>
-              <Text style={styles.itemTitle}>{INCIDENT_STATUS[status] ?? status}</Text>
+            <View key={id} style={[styles.item, { borderTopColor: colors.line }]}>
+              <Text style={[styles.itemTitle, { color: colors.ink }]}>{INCIDENT_STATUS[status] ?? status}</Text>
               <MutedText>Incidente {id}</MutedText>
+              {INCIDENT_STAGE[status] ? <StatusTimeline current={INCIDENT_STAGE[status]} /> : null}
               {Array.isArray(incident.reportIds) ? <MutedText>Reportes vinculados: {incident.reportIds.length}</MutedText> : null}
-              <View style={styles.timeline}>
-                <Text style={styles.section}>Bitácora de acciones</Text>
+              <View style={[styles.timeline, { borderTopColor: colors.line }]}>
+                <Text style={[styles.section, { color: colors.ink }]}>Bitácora de acciones</Text>
                 {(incidentEvents[id] ?? []).map((event) => (
                   <View key={event.id} style={styles.event}>
-                    <Text style={styles.eventText}>{typeof event.message === 'string' ? event.message : 'Actualización del incidente.'}</Text>
-                    <Text style={styles.eventDate}>{formatEventDate(event.createdAt)}</Text>
+                    <Text style={[styles.eventText, { color: colors.inkMuted }]}>{typeof event.message === 'string' ? event.message : 'Actualización del incidente.'}</Text>
+                    <Text style={[styles.eventDate, { color: colors.inkSubtle }]}>{formatEventDate(event.createdAt)}</Text>
                   </View>
                 ))}
                 {!incidentEvents[id]?.length ? <MutedText>Sin acciones registradas.</MutedText> : null}
               </View>
               {role === 'brigade_leader' && status === 'pending_assignment' ? (
                 <View style={styles.assignment}>
-                  <Text style={styles.section}>Personal disponible de brigadas autorizadas</Text>
+                  <Text style={[styles.section, { color: colors.ink }]}>Personal disponible de brigadas autorizadas</Text>
                   {brigades.flatMap((brigade) => brigade.members
                     .filter((member) => brigade.availability === 'available' && member.availability === 'available')
                     .map((member) => (
@@ -315,7 +329,7 @@ export default function IncidentsScreen() {
               {role === 'firefighter' && status === 'assigned' && incident.assignedUid === user.uid ? (
                 <View style={styles.assignment}>
                   <Field label="Motivo si no puedes intervenir" value={reason} onChangeText={setReason} placeholder="Describe por qué se requiere reasignación." multiline />
-                  <ActionButton label="Informar que no puedo intervenir" secondary disabled={busy !== null || reason.trim().length < 10} onPress={() => void decline(id)} />
+                  <ActionButton label="No puedo atender esta asignación" secondary disabled={busy !== null || reason.trim().length < 10} onPress={() => void decline(id)} />
                 </View>
               ) : null}
               {canUpdate && nextStatuses.includes('closed') ? (
@@ -356,7 +370,7 @@ export default function IncidentsScreen() {
               ) : null}
               {currentCommander && status !== 'closed' ? (
                 <View style={styles.assignment}>
-                  <Text style={styles.section}>Transferencia de mando</Text>
+                  <Text style={[styles.section, { color: colors.ink }]}>Transferencia de mando</Text>
                   <Field label="UID de la persona operativa autorizada" value={targetUid} onChangeText={setTargetUid} placeholder="UID de cuenta existente" />
                   <Field label="Motivo de transferencia" value={transferReason} onChangeText={setTransferReason} placeholder="Motivo documentado (mínimo 10 caracteres)" multiline />
                   <ActionButton label="Registrar transferencia" secondary disabled={busy !== null || targetUid.length < 10 || transferReason.trim().length < 10} onPress={() => void transfer(id)} />
@@ -371,14 +385,14 @@ export default function IncidentsScreen() {
 }
 
 const styles = StyleSheet.create({
-  item: { borderTopWidth: 1, borderTopColor: '#e2e9e4', paddingTop: 13, gap: 9 },
-  itemTitle: { color: '#172c27', fontSize: 14, fontWeight: '800' },
-  copy: { color: '#52665a', fontSize: 12, lineHeight: 18 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  assignment: { borderRadius: 9, backgroundColor: '#f5f8f5', padding: 11, gap: 9 },
-  section: { color: '#172c27', fontSize: 12, fontWeight: '800' },
-  timeline: { borderTopWidth: 1, borderTopColor: '#e2e9e4', paddingTop: 10, gap: 8 },
-  event: { gap: 3 },
-  eventText: { color: '#52665a', fontSize: 11, lineHeight: 16 },
-  eventDate: { color: '#7c8b83', fontSize: 9 },
+  item: { borderTopWidth: dimensions.hairline, paddingTop: spacing.sm, gap: spacing.sm },
+  itemTitle: { fontFamily: typography.family.sans, fontSize: typography.size.body, fontWeight: '800' },
+  copy: { fontFamily: typography.family.sans, fontSize: typography.size.small, lineHeight: typography.lineHeight.body },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  assignment: { borderRadius: radii.medium, padding: spacing.sm, gap: spacing.sm },
+  section: { fontFamily: typography.family.sans, fontSize: typography.size.small, fontWeight: '800' },
+  timeline: { borderTopWidth: dimensions.hairline, paddingTop: spacing.sm, gap: spacing.xs },
+  event: { gap: spacing.xxs },
+  eventText: { fontFamily: typography.family.sans, fontSize: typography.size.caption, lineHeight: typography.lineHeight.body },
+  eventDate: { fontFamily: typography.family.mono, fontSize: typography.size.caption },
 });

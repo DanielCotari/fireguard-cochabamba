@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, useColorScheme } from 'react-native';
 import type * as Leaflet from 'leaflet';
 import type { useMapEvents as UseMapEvents } from 'react-leaflet';
 import type { Coordinate } from '@/lib/report-service';
 import type { DetectionCollection } from '@/components/detection-map-types';
+import { dimensions, radii, spacing, typography, themeTokens } from '@/theme/tokens';
+import { pilotArea } from '@/constants/pilot-area';
 
 import 'leaflet/dist/leaflet.css';
 
@@ -32,14 +34,18 @@ export function DetectionMap({
   detections,
   selectedLocation,
   onLocationSelect,
+  onDetectionSelect,
 }: {
   height: number;
   detections: DetectionCollection | null;
   selectedLocation?: Coordinate | null;
   onLocationSelect?: (location: Coordinate) => void;
+  onDetectionSelect?: (feature: DetectionCollection['features'][number]) => void;
 }) {
   const [modules, setModules] = useState<LeafletModules | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
+  const dark = useColorScheme() === 'dark';
+  const colors = themeTokens[dark ? 'dark' : 'light'].colors;
 
   useEffect(() => {
     let active = true;
@@ -54,22 +60,36 @@ export function DetectionMap({
   }, []);
 
   if (mapError) {
-    return <View style={[styles.mapMessage, { height }]}><Text style={styles.messageText}>{mapError}</Text></View>;
+    return <View style={[styles.mapMessage, { height, backgroundColor: colors.surface, borderColor: colors.line }]}><Text style={[styles.messageText, { color: colors.inkMuted }]}>{mapError}</Text></View>;
   }
   if (!modules) {
-    return <View style={[styles.mapMessage, { height }]}><Text style={styles.messageText}>Cargando mapa…</Text></View>;
+    return <View style={[styles.mapMessage, { height, backgroundColor: colors.surface, borderColor: colors.line }]}><Text style={[styles.messageText, { color: colors.inkMuted }]}>Cargando mapa…</Text></View>;
   }
 
-  const { MapContainer, TileLayer, GeoJSON, CircleMarker } = modules.reactLeaflet;
+  const { MapContainer, TileLayer, GeoJSON, CircleMarker, Rectangle } = modules.reactLeaflet;
   const center: Leaflet.LatLngExpression = [-17.35, -66.15];
   const pointToLayer: Leaflet.GeoJSONOptions['pointToLayer'] = (feature, latlng) => {
-    const color = feature?.properties?.sensor === 'MODIS' ? '#f08c3d' : '#4795b8';
-    return modules.leaflet.circleMarker(latlng, {
-      radius: 5,
-      color: '#fff',
-      weight: 1,
-      fillColor: color,
-      fillOpacity: 0.9,
+    const modis = feature?.properties?.sensor === 'MODIS';
+    const color = modis ? colors.modis : colors.viirs;
+    if (modis) {
+      return modules.leaflet.circleMarker(latlng, {
+        radius: spacing.xxs,
+        color: colors.surfaceRaised,
+        weight: dimensions.hairline,
+        fillColor: color,
+        fillOpacity: 0.9,
+      });
+    }
+    return modules.leaflet.rectangle(
+      [[latlng.lat - 0.0007, latlng.lng - 0.0007], [latlng.lat + 0.0007, latlng.lng + 0.0007]],
+      { color: colors.surfaceRaised, weight: dimensions.hairline, fillColor: color, fillOpacity: 0.9 },
+    );
+  };
+  const onEachFeature: Leaflet.GeoJSONOptions['onEachFeature'] = (feature, layer) => {
+    layer.on('click', () => {
+      if (feature.geometry.type !== 'Point') return;
+      const selectedFeature = detections?.features.find((item) => item.properties === feature.properties);
+      if (selectedFeature) onDetectionSelect?.(selectedFeature);
     });
   };
 
@@ -85,12 +105,16 @@ export function DetectionMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {detections ? <GeoJSON data={detections as GeoJSON.GeoJsonObject} pointToLayer={pointToLayer} /> : null}
+        <Rectangle
+          bounds={[[pilotArea.south, pilotArea.west], [pilotArea.north, pilotArea.east]]}
+          pathOptions={{ color: colors.calm, weight: dimensions.rule, dashArray: `${spacing.xs} ${spacing.xs}`, fillOpacity: 0.035, fillColor: colors.calm }}
+        />
+        {detections ? <GeoJSON data={detections as GeoJSON.GeoJsonObject} pointToLayer={pointToLayer} onEachFeature={onEachFeature} /> : null}
         {selectedLocation ? (
           <CircleMarker
             center={[selectedLocation.latitude, selectedLocation.longitude]}
-            radius={8}
-            pathOptions={{ color: '#fff', weight: 2, fillColor: '#a43e31', fillOpacity: 1 }}
+            radius={spacing.sm}
+            pathOptions={{ color: colors.surfaceRaised, weight: 2, fillColor: colors.attention, fillOpacity: 1 }}
           />
         ) : null}
         {onLocationSelect ? <MapClickEvents useMapEvents={modules.reactLeaflet.useMapEvents} onLocationSelect={onLocationSelect} /> : null}
@@ -100,8 +124,8 @@ export function DetectionMap({
 }
 
 const styles = StyleSheet.create({
-  mapWrap: { overflow: 'hidden', borderRadius: 12, backgroundColor: '#e8eee8' },
+  mapWrap: { overflow: 'hidden', borderRadius: radii.medium },
   map: { height: '100%', width: '100%', zIndex: 0 },
-  mapMessage: { borderRadius: 12, backgroundColor: '#e8eee8', alignItems: 'center', justifyContent: 'center', padding: 18 },
-  messageText: { color: '#64756e', fontSize: 12, textAlign: 'center' },
+  mapMessage: { borderWidth: dimensions.hairline, borderRadius: radii.medium, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  messageText: { fontFamily: typography.family.sans, fontSize: typography.size.small, textAlign: 'center' },
 });

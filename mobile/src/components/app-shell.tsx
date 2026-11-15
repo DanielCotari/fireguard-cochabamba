@@ -2,6 +2,8 @@ import { router, Slot, usePathname } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import type { PropsWithChildren } from 'react';
 import { useAuth, type AppRole } from '@/lib/auth-context';
+import { useAtlasTheme } from '@/components/atlas-ui';
+import { breakpoints, dimensions, radii, spacing, typography } from '@/theme/tokens';
 
 type NavigationItem = {
   label: string;
@@ -32,9 +34,10 @@ const ROLE_LABELS: Record<AppRole, string> = {
 
 export function AppShell({ children }: PropsWithChildren) {
   const { width } = useWindowDimensions();
-  const compact = width < 900;
+  const compact = width < breakpoints.desktopNavigation;
   const pathname = usePathname();
   const { user, role, technicalAdmin, configured, loading } = useAuth();
+  const { colors } = useAtlasTheme();
   const standalone = pathname === '/' || (pathname === '/profile' && !user);
   const items = NAVIGATION.filter((item) => item.allowed(role, technicalAdmin));
 
@@ -44,15 +47,16 @@ export function AppShell({ children }: PropsWithChildren) {
       <Pressable
         key={item.href}
         accessibilityRole="link"
+        accessibilityLabel={item.label}
         accessibilityState={{ selected: active }}
         onPress={() => router.push(item.href)}
         style={({ pressed }) => [
           compactMode ? styles.mobileItem : styles.desktopItem,
-          active && (compactMode ? styles.mobileItemActive : styles.desktopItemActive),
+          active && { backgroundColor: colors.calmSoft },
           pressed && styles.pressed,
         ]}
       >
-        <Text style={[compactMode ? styles.mobileLabel : styles.desktopLabel, active && styles.activeLabel]}>
+        <Text style={[compactMode ? styles.mobileLabel : styles.desktopLabel, { color: active ? colors.calm : colors.inkMuted }]}>
           {item.label}
         </Text>
       </Pressable>
@@ -60,27 +64,27 @@ export function AppShell({ children }: PropsWithChildren) {
   };
 
   return (
-    <View style={[styles.shell, !compact && styles.desktopShell]}>
+    <View style={[styles.shell, { backgroundColor: colors.canvas }, !compact && styles.desktopShell]}>
       {!compact && !standalone ? (
-        <View style={styles.sidebar}>
+        <View style={[styles.sidebar, { backgroundColor: colors.surface, borderRightColor: colors.line }]}>
           <View style={styles.brand}>
-            <View style={styles.brandMark}><Text style={styles.brandMarkText}>F</Text></View>
+            <View style={[styles.brandMark, { backgroundColor: colors.ink }]}><Text style={[styles.brandMarkText, { color: colors.surface }]}>F</Text></View>
             <View>
-              <Text style={styles.brandName}>FIREGUARD</Text>
-              <Text style={styles.brandLocation}>BOLIVIA</Text>
+              <Text style={[styles.brandName, { color: colors.ink }]}>FIREGUARD</Text>
+              <Text style={[styles.brandLocation, { color: colors.inkMuted }]}>COCHABAMBA · BOLIVIA</Text>
             </View>
           </View>
-          <Text style={styles.navHeading}>PLATAFORMA</Text>
+          <Text style={[styles.navHeading, { color: colors.inkSubtle }]}>PLATAFORMA</Text>
           <ScrollView contentContainerStyle={styles.navList}>{items.map((item) => navigationItem(item, false))}</ScrollView>
-          <View style={styles.accountBlock}>
-            <Text style={styles.accountName} numberOfLines={1}>{user?.displayName || user?.email || 'Acceso público'}</Text>
-            <Text style={styles.accountRole}>{loading ? 'Cargando cuenta…' : !configured ? 'Servicios sin configurar' : ROLE_LABELS[role]}</Text>
+          <View style={[styles.accountBlock, { borderTopColor: colors.line }]}>
+            <Text style={[styles.accountName, { color: colors.ink }]} numberOfLines={1}>{user?.displayName || user?.email || 'Acceso público'}</Text>
+            <Text style={[styles.accountRole, { color: colors.inkMuted }]}>{loading ? 'Cargando cuenta…' : !configured ? 'Servicios sin configurar' : ROLE_LABELS[role]}</Text>
           </View>
         </View>
       ) : null}
       <View style={styles.page}>{children ?? <Slot />}</View>
       {compact && !standalone ? (
-        <View style={styles.mobileNav}>
+      <View style={[styles.mobileNav, { borderTopColor: colors.line, backgroundColor: colors.surface }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobileNavContent}>
             {items.map((item) => navigationItem(item, true))}
           </ScrollView>
@@ -91,28 +95,25 @@ export function AppShell({ children }: PropsWithChildren) {
 }
 
 const styles = StyleSheet.create({
-  shell: { flex: 1, backgroundColor: '#f4f7f4' },
+  shell: { flex: 1 },
   desktopShell: { flexDirection: 'row' },
-  sidebar: { width: 224, backgroundColor: '#fff', borderRightWidth: 1, borderRightColor: '#e2e9e4', padding: 18 },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, marginBottom: 26 },
-  brandMark: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#144b3a', alignItems: 'center', justifyContent: 'center' },
-  brandMarkText: { color: '#fff', fontSize: 22, fontWeight: '800' },
-  brandName: { color: '#172c27', fontSize: 13, fontWeight: '900', letterSpacing: 1.4 },
-  brandLocation: { color: '#64756e', fontSize: 9, fontWeight: '700', letterSpacing: 1.3, marginTop: 3 },
-  navHeading: { color: '#7c8b83', fontSize: 9, fontWeight: '800', letterSpacing: 1.2, marginBottom: 9 },
-  navList: { gap: 5 },
-  desktopItem: { paddingHorizontal: 12, paddingVertical: 11, borderRadius: 9 },
-  desktopItemActive: { backgroundColor: '#eaf4ed' },
-  desktopLabel: { color: '#52665a', fontSize: 13, fontWeight: '600' },
-  activeLabel: { color: '#144b3a', fontWeight: '800' },
-  accountBlock: { borderTopWidth: 1, borderTopColor: '#e2e9e4', paddingTop: 14, marginTop: 'auto' },
-  accountName: { color: '#172c27', fontSize: 11, fontWeight: '700' },
-  accountRole: { color: '#64756e', fontSize: 10, marginTop: 4 },
+  sidebar: { width: dimensions.sidebar, borderRightWidth: dimensions.hairline, padding: spacing.md },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.xl },
+  brandMark: { width: dimensions.brandMark, height: dimensions.brandMark, borderRadius: radii.medium, alignItems: 'center', justifyContent: 'center' },
+  brandMarkText: { fontFamily: typography.family.editorial, fontSize: typography.size.heading },
+  brandName: { fontFamily: typography.family.sans, fontSize: typography.size.small, fontWeight: '800', letterSpacing: 1.4 },
+  brandLocation: { fontFamily: typography.family.mono, fontSize: typography.size.caption, letterSpacing: 0.6, marginTop: spacing.xxs },
+  navHeading: { fontFamily: typography.family.mono, fontSize: typography.size.caption, fontWeight: '800', letterSpacing: 1, marginBottom: spacing.xs },
+  navList: { gap: spacing.xxs },
+  desktopItem: { minHeight: dimensions.touchTarget, justifyContent: 'center', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radii.small },
+  desktopLabel: { fontFamily: typography.family.sans, fontSize: typography.size.small, fontWeight: '600' },
+  accountBlock: { borderTopWidth: dimensions.hairline, paddingTop: spacing.md, marginTop: 'auto' },
+  accountName: { fontFamily: typography.family.sans, fontSize: typography.size.caption, fontWeight: '700' },
+  accountRole: { fontFamily: typography.family.sans, fontSize: typography.size.caption, marginTop: spacing.xxs },
   page: { flex: 1, minWidth: 0 },
-  mobileNav: { borderTopWidth: 1, borderTopColor: '#e2e9e4', backgroundColor: '#fff', paddingVertical: 7 },
-  mobileNavContent: { flexDirection: 'row', gap: 5, paddingHorizontal: 8 },
-  mobileItem: { minWidth: 70, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 9 },
-  mobileItemActive: { backgroundColor: '#eaf4ed' },
-  mobileLabel: { color: '#52665a', fontSize: 10, fontWeight: '700' },
-  pressed: { opacity: 0.7 },
+  mobileNav: { borderTopWidth: dimensions.hairline, paddingVertical: spacing.xxs },
+  mobileNavContent: { flexDirection: 'row', gap: spacing.xxs, paddingHorizontal: spacing.xs },
+  mobileItem: { minWidth: dimensions.navigationTabWidth, minHeight: dimensions.touchTarget, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radii.small },
+  mobileLabel: { fontFamily: typography.family.sans, fontSize: typography.size.caption, fontWeight: '700' },
+  pressed: { opacity: 0.75 },
 });

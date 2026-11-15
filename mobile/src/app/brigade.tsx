@@ -1,8 +1,24 @@
 import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Badge, EmptyState, StatusTimeline, useAtlasTheme } from '@/components/atlas-ui';
 import { ActionButton, MutedText, Notice, Panel, WorkspacePage } from '@/components/workspace-ui';
 import { useAuth } from '@/lib/auth-context';
-import { callOperation, getAuthorizedBrigades, getBrigadeMember } from '@/lib/operations-service';
+import { dimensions, radii, spacing, typography } from '@/theme/tokens';
+import {
+  callOperation,
+  getAuthorizedBrigades,
+  getBrigadeMember,
+  subscribeOperationalIncidents,
+  type OperationalDocument,
+} from '@/lib/operations-service';
+
+const ASSIGNMENT_STATUS: Record<string, { label: string; stage: string }> = {
+  assigned: { label: 'Asignado · sin confirmar desplazamiento', stage: 'Asignación' },
+  en_route: { label: 'En desplazamiento', stage: 'Desplazamiento' },
+  in_intervention: { label: 'En intervención', stage: 'Intervención' },
+  monitoring: { label: 'En vigilancia', stage: 'Vigilancia' },
+};
 
 type BrigadeInfo = {
   id: string;
@@ -17,8 +33,11 @@ type MemberInfo = { uid: string; name: string; availability: string };
 
 export default function BrigadeScreen() {
   const { user, role } = useAuth();
+  const { colors } = useAtlasTheme();
   const [brigades, setBrigades] = useState<BrigadeInfo[]>([]);
   const [members, setMembers] = useState<MemberInfo[]>([]);
+  const [assignments, setAssignments] = useState<OperationalDocument[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(true);
   const [availability, setAvailability] = useState('available');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -64,6 +83,23 @@ export default function BrigadeScreen() {
     return () => { active = false; };
   }, [role, user]);
 
+  useEffect(() => {
+    if (!user || role !== 'firefighter') return;
+    return subscribeOperationalIncidents(
+      user.uid,
+      role,
+      [],
+      (items) => {
+        setAssignments(items.filter((item) => item.status !== 'closed'));
+        setAssignmentsLoading(false);
+      },
+      (failure) => {
+        setError(failure.message);
+        setAssignmentsLoading(false);
+      },
+    );
+  }, [role, user]);
+
   const updateAvailability = async (next: string) => {
     setBusy(true);
     setError(null);
@@ -92,8 +128,9 @@ export default function BrigadeScreen() {
       {error ? <Notice error>{error}</Notice> : null}
       {message ? <Notice>{message}</Notice> : null}
       {role === 'firefighter' ? (
+        <>
         <Panel title="Mi disponibilidad">
-          <Text style={styles.status}>Estado actual: {availability === 'available' ? 'Disponible' : availability === 'occupied' ? 'Ocupado' : availability === 'out_of_service' ? 'Fuera de servicio' : 'Sin configurar'}</Text>
+          <Text style={[styles.status, { color: colors.ink }]}>Estado actual: {availability === 'available' ? 'Disponible' : availability === 'occupied' ? 'Ocupado' : availability === 'out_of_service' ? 'Fuera de servicio' : 'Sin configurar'}</Text>
           <View style={styles.actions}>
             {[
               ['available', 'Disponible'],
@@ -101,31 +138,61 @@ export default function BrigadeScreen() {
             ].map(([value, label]) => (
               <Pressable
                 key={value}
+                accessibilityRole="button"
+                accessibilityLabel={`Establecer disponibilidad: ${label}`}
+                accessibilityState={{ selected: availability === value, disabled: busy || availability === 'occupied' }}
                 disabled={busy || availability === 'occupied'}
                 onPress={() => void updateAvailability(value)}
-                style={({ pressed }) => [styles.chip, availability === value && styles.chipSelected, (pressed || busy || availability === 'occupied') && styles.disabled]}
+                style={({ pressed }) => [
+                  styles.chip,
+                  { borderColor: availability === value ? colors.calm : colors.line, backgroundColor: availability === value ? colors.calmSoft : colors.surface },
+                  (pressed || busy || availability === 'occupied') && styles.disabled,
+                ]}
               >
-                <Text style={[styles.chipText, availability === value && styles.chipTextSelected]}>{label}</Text>
+                <Text style={[styles.chipText, { color: availability === value ? colors.calm : colors.inkMuted }]}>{label}</Text>
               </Pressable>
             ))}
           </View>
           {availability === 'occupied' ? <MutedText>La disponibilidad cambia automáticamente al cerrar una asignación activa.</MutedText> : null}
           {availability !== 'occupied' ? <ActionButton label={busy ? 'Guardando…' : 'Guardar disponibilidad'} onPress={() => void updateAvailability(availability)} disabled={busy} /> : null}
         </Panel>
+        <Panel title="Mis asignaciones activas">
+          {assignmentsLoading ? <MutedText>Cargando asignaciones autorizadas…</MutedText> : null}
+          {!assignmentsLoading && !assignments.length ? (
+            <EmptyState variant="noData" title="Sin asignaciones activas">
+              Cuando recibas una asignación aparecerá aquí. “Asignado” no significa que el equipo ya esté en desplazamiento.
+            </EmptyState>
+          ) : null}
+          {assignments.map((assignment) => {
+            const status = typeof assignment.status === 'string' ? assignment.status : '';
+            const statusInfo = ASSIGNMENT_STATUS[status];
+            return (
+              <View key={assignment.id} style={[styles.assignment, { borderTopColor: colors.line }]}>
+                <Badge tone={status === 'assigned' ? 'attention' : 'calm'}>
+                  {statusInfo?.label ?? 'Estado operativo pendiente'}
+                </Badge>
+                <MutedText>Incidente {assignment.id}</MutedText>
+                {statusInfo ? <StatusTimeline current={statusInfo.stage} /> : null}
+                <ActionButton label="Abrir gestión de asignaciones" secondary onPress={() => router.push('/incidents')} />
+              </View>
+            );
+          })}
+        </Panel>
+        </>
       ) : null}
       <Panel title={role === 'brigade_leader' ? 'Brigadas a mi cargo' : 'Mis brigadas'}>
         {loading ? <MutedText>Cargando información autorizada…</MutedText> : null}
         {!loading && !brigades.length ? <MutedText>No se encontraron brigadas en los permisos de esta cuenta.</MutedText> : null}
         {brigades.map((brigade) => (
-          <View key={brigade.id} style={styles.card}>
-            <Text style={styles.status}>{brigade.name}</Text>
+          <View key={brigade.id} style={[styles.card, { borderTopColor: colors.line }]}>
+            <Text style={[styles.status, { color: colors.ink }]}>{brigade.name}</Text>
             {brigade.availability ? <MutedText>Brigada: {brigade.availability === 'available' ? 'disponible' : brigade.availability === 'occupied' ? 'ocupada' : brigade.availability}</MutedText> : null}
             {brigade.contact ? <MutedText>Contacto institucional: {brigade.contact}</MutedText> : null}
             {brigade.capabilities?.length ? <MutedText>Capacidades: {brigade.capabilities.join(', ')}</MutedText> : null}
             {brigade.memberUids?.map((uid) => {
               const member = members.find((item) => item.uid === uid);
               return (
-                <Text key={uid} style={styles.member}>
+                <Text key={uid} style={[styles.member, { color: colors.inkMuted }]}>
                   {member?.name ?? `Integrante ${uid.slice(0, 6)}`} · {member?.availability === 'available' ? 'disponible' : member?.availability === 'occupied' ? 'ocupado' : member?.availability === 'out_of_service' ? 'fuera de servicio' : 'estado pendiente'}
                 </Text>
               );
@@ -138,13 +205,12 @@ export default function BrigadeScreen() {
 }
 
 const styles = StyleSheet.create({
-  status: { color: '#172c27', fontSize: 14, fontWeight: '800' },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingVertical: 9, paddingHorizontal: 13, borderRadius: 18, borderWidth: 1, borderColor: '#e2e9e4', backgroundColor: '#fff' },
-  chipSelected: { backgroundColor: '#eaf2ec', borderColor: '#144b3a' },
-  chipText: { color: '#52665a', fontSize: 11, fontWeight: '700' },
-  chipTextSelected: { color: '#144b3a' },
+  status: { fontFamily: typography.family.sans, fontSize: typography.size.body, fontWeight: '800' },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  chip: { minHeight: dimensions.touchTarget, justifyContent: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.md, borderRadius: radii.pill, borderWidth: dimensions.hairline },
+  chipText: { fontFamily: typography.family.sans, fontSize: typography.size.caption, fontWeight: '700' },
   disabled: { opacity: 0.5 },
-  card: { borderTopWidth: 1, borderTopColor: '#e2e9e4', paddingTop: 11, gap: 7 },
-  member: { color: '#52665a', fontSize: 11, paddingVertical: 3 },
+  card: { borderTopWidth: dimensions.hairline, paddingTop: spacing.sm, gap: spacing.xs },
+  assignment: { borderTopWidth: dimensions.hairline, paddingTop: spacing.sm, gap: spacing.sm },
+  member: { fontFamily: typography.family.sans, fontSize: typography.size.caption, paddingVertical: spacing.xxs },
 });

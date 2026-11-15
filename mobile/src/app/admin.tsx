@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useAtlasTheme } from '@/components/atlas-ui';
 import { ActionButton, Field, MutedText, Notice, Panel, WorkspacePage } from '@/components/workspace-ui';
 import { useAuth } from '@/lib/auth-context';
 import { callOperation } from '@/lib/operations-service';
+import { spacing, typography } from '@/theme/tokens';
 
 const OPERATIONAL_ROLES = [
   ['firefighter', 'Bombero'],
@@ -12,6 +14,7 @@ const OPERATIONAL_ROLES = [
 
 export default function AdminScreen() {
   const { technicalAdmin } = useAuth();
+  const { colors } = useAtlasTheme();
   const [targetUid, setTargetUid] = useState('');
   const [role, setRole] = useState<(typeof OPERATIONAL_ROLES)[number][0]>('firefighter');
   const [brigadeIds, setBrigadeIds] = useState('');
@@ -68,7 +71,7 @@ export default function AdminScreen() {
       {message ? <Notice>{message}</Notice> : null}
       <Panel title="Activar una cuenta operativa">
         <Field label="UID de una cuenta existente" value={targetUid} onChangeText={setTargetUid} placeholder="UID de Firebase Authentication" />
-        <Text style={styles.label}>Rol asignado por proceso autorizado</Text>
+        <Text style={[styles.label, { color: colors.ink }]}>Rol asignado por proceso autorizado</Text>
         <View style={styles.roles}>
           {OPERATIONAL_ROLES.map(([value, label]) => (
             <ActionButton key={value} label={label} secondary={role !== value} onPress={() => setRole(value)} />
@@ -81,7 +84,7 @@ export default function AdminScreen() {
       </Panel>
       <Panel title="Permisos de administración técnica">
         <Field label="UID de cuenta existente" value={techUid} onChangeText={setTechUid} placeholder="UID de Firebase Authentication" />
-        <MutedText>Este permiso no otorga funciones de mando ni lectura operativa por sí solo.</MutedText>
+        <MutedText>El permiso técnico no otorga mando operativo ni lectura operativa por sí solo.</MutedText>
         <View style={styles.roles}>
           <ActionButton label="Conceder administración técnica" disabled={busy || techUid.trim().length < 10} onPress={() => void updateTechnicalRole(true)} />
           <ActionButton label="Revocar permiso" secondary disabled={busy || techUid.trim().length < 10} onPress={() => void updateTechnicalRole(false)} />
@@ -92,6 +95,6 @@ export default function AdminScreen() {
 }
 
 const styles = StyleSheet.create({
-  label: { color: '#172c27', fontSize: 12, fontWeight: '700' },
-  roles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  label: { fontFamily: typography.family.sans, fontSize: typography.size.small, fontWeight: '700' },
+  roles: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
 });

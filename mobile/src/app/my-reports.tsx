@@ -3,6 +3,8 @@ import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { ActionButton, MutedText, Notice, Panel, WorkspacePage } from '@/components/workspace-ui';
 import { useAuth } from '@/lib/auth-context';
+import { EmptyState, useAtlasTheme } from '@/components/atlas-ui';
+import { dimensions, radii, spacing, typography } from '@/theme/tokens';
 import {
   subscribeToMyReports,
   subscribeToReportUpdates,
@@ -24,7 +26,8 @@ function formatDate(value: CitizenReport['observedAt'] | CitizenReport['createdA
 }
 
 export default function MyReportsScreen() {
-  const { user, role } = useAuth();
+  const { user, role, configured } = useAuth();
+  const { colors } = useAtlasTheme();
   const [reports, setReports] = useState<CitizenReport[]>([]);
   const [updates, setUpdates] = useState<Record<string, ReportUpdate[]>>({});
   const [loading, setLoading] = useState(Boolean(user));
@@ -63,10 +66,16 @@ export default function MyReportsScreen() {
   if (!user) {
     return (
       <WorkspacePage title="Mis reportes" description="El historial privado solo está disponible para la cuenta que creó cada reporte.">
-        <Panel title="Inicia sesión">
-          <MutedText>La consulta del mapa y el calendario es pública; el historial ciudadano requiere autenticación.</MutedText>
-          <ActionButton label="Ir a Perfil" onPress={() => router.push('/profile')} />
-        </Panel>
+        {!configured ? (
+          <EmptyState variant="noFirebase" title="Servicios de reporte no configurados">
+            No se pueden confirmar ni guardar reportes porque Firebase no está configurado.
+          </EmptyState>
+        ) : (
+          <Panel title="Inicia sesión">
+            <MutedText>La consulta del mapa y el calendario es pública; el historial ciudadano requiere autenticación.</MutedText>
+            <ActionButton label="Ir a Perfil" onPress={() => router.push('/profile')} />
+          </Panel>
+        )}
       </WorkspacePage>
     );
   }
@@ -95,9 +104,9 @@ export default function MyReportsScreen() {
         <Panel
           key={report.id}
           title={REPORT_STATUS[report.status] ?? report.status}
-          action={<Text style={styles.date}>{formatDate(report.createdAt)}</Text>}
+          action={<Text style={[styles.date, { color: colors.inkSubtle }]}>{formatDate(report.createdAt)}</Text>}
         >
-          <Text style={styles.description}>{report.description}</Text>
+          <Text style={[styles.description, { color: colors.ink }]}>{report.description}</Text>
           <MutedText>Observado: {formatDate(report.observedAt)}</MutedText>
           <MutedText>
             Contraste satelital: {report.satelliteMatch === 'match_found'
@@ -107,14 +116,14 @@ export default function MyReportsScreen() {
                 : 'pendiente de consulta'}
           </MutedText>
           {report.incidentId ? <MutedText>Incidente asociado: {report.incidentId}</MutedText> : null}
-          <View style={styles.timeline}>
-            <Text style={styles.timelineTitle}>Actualizaciones</Text>
+          <View style={[styles.timeline, { borderTopColor: colors.line }]}>
+            <Text style={[styles.timelineTitle, { color: colors.ink }]}>Actualizaciones</Text>
             {(updates[report.id] ?? []).map((update) => (
               <View key={update.id} style={styles.event}>
-                <View style={styles.eventDot} />
+                <View style={[styles.eventDot, { backgroundColor: colors.calm }]} />
                 <View style={styles.eventCopy}>
-                  <Text style={styles.eventMessage}>{update.message}</Text>
-                  <Text style={styles.date}>{formatDate(update.createdAt)}</Text>
+                  <Text style={[styles.eventMessage, { color: colors.inkMuted }]}>{update.message}</Text>
+                  <Text style={[styles.date, { color: colors.inkSubtle }]}>{formatDate(update.createdAt)}</Text>
                 </View>
               </View>
             ))}
@@ -127,12 +136,12 @@ export default function MyReportsScreen() {
 }
 
 const styles = StyleSheet.create({
-  date: { color: '#64756e', fontSize: 10 },
-  description: { color: '#172c27', fontSize: 13, lineHeight: 19 },
-  timeline: { borderTopWidth: 1, borderTopColor: '#e2e9e4', paddingTop: 10, gap: 9 },
-  timelineTitle: { color: '#172c27', fontSize: 12, fontWeight: '800' },
-  event: { flexDirection: 'row', gap: 8 },
-  eventDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#2d8a5a', marginTop: 5 },
-  eventCopy: { flex: 1, gap: 2 },
-  eventMessage: { color: '#52665a', fontSize: 11, lineHeight: 16 },
+  date: { fontFamily: typography.family.mono, fontSize: typography.size.caption },
+  description: { fontFamily: typography.family.sans, fontSize: typography.size.small, lineHeight: typography.lineHeight.body },
+  timeline: { borderTopWidth: dimensions.hairline, paddingTop: spacing.sm, gap: spacing.sm },
+  timelineTitle: { fontFamily: typography.family.sans, fontSize: typography.size.small, fontWeight: '800' },
+  event: { flexDirection: 'row', gap: spacing.xs, minHeight: dimensions.touchTarget },
+  eventDot: { width: spacing.xs, height: spacing.xs, borderRadius: radii.pill, marginTop: spacing.xs },
+  eventCopy: { flex: 1, gap: spacing.xxs },
+  eventMessage: { fontFamily: typography.family.sans, fontSize: typography.size.caption, lineHeight: typography.lineHeight.body },
 });
