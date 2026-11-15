@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return signedIn() && request.auth.token.role is string
+        ? request.auth.token.role
+        : 'citizen';
+    }
+
+    function isOperationalReviewer() {
+      return signedIn() && role() in ['brigade_leader', 'incident_commander'];
+    }
+
+    function hasOperationalArea(areaId) {
+      return signedIn() &&
+        request.auth.token.operationalAreaIds is list &&
+        request.auth.token.operationalAreaIds.hasAny([areaId]);
+    }
+
+    function canReviewReport(data) {
+      return isOperationalReviewer() && hasOperationalArea(data.operationalAreaId);
+    }
+
+    function isTechnicalAdmin() {
+      return signedIn() && request.auth.token.technicalAdmin == true;
+    }
+
+    function canReadIncident(data) {
+      return signedIn() && (
+        data.citizenUids.hasAny([request.auth.uid]) ||
+        data.assignedUids.hasAny([request.auth.uid]) ||
+        (role() in ['brigade_leader', 'incident_commander'] &&
+          hasOperationalArea(data.operationalAreaId))
+      );
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (
+        request.auth.uid == uid ||
+        (role() == 'brigade_leader' &&
+          request.auth.token.brigadeIds is list &&
+          resource.data.brigadeIds is list &&
+          request.auth.token.brigadeIds.hasAny(resource.data.brigadeIds))
+      );
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['displayName', 'email', 'phone', 'createdAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 1
+        && request.resource.data.displayName.size() <= 120
+        && request.resource.data.email == request.auth.token.email
+        && (request.resource.data.phone == null || request.resource.data.phone is string)
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /reports/{reportId} {
+      allow get, list: if signedIn() && (
+        resource.data.ownerUid == request.auth.uid ||
+        canReviewReport(resource.data)
+      );
+      allow create, update, delete: if false;
+
+      match /updates/{updateId} {
+        allow read: if signedIn() && (
+          get(/databases/$(database)/documents/reports/$(reportId)).data.ownerUid == request.auth.uid ||
+          canReviewReport(get(/databases/$(database)/documents/reports/$(reportId)).data)
+        );
+        allow write: if false;
+      }
+    }
+
+    match /incidents/{incidentId} {
+      allow get, list: if canReadIncident(resource.data);
+      allow create, update, delete: if false;
+
+      match /events/{eventId} {
+        allow read: if canReadIncident(
+          get(/databases/$(database)/documents/incidents/$(incidentId)).data
+        );
+        allow write: if false;
+      }
+    }
+
+    match /organizations/{organizationId} {
+      allow read: if isTechnicalAdmin() ||
+        (signedIn() && role() in ['brigade_leader', 'firefighter', 'incident_commander'] &&
+          hasOperationalArea(resource.data.operationalAreaId));
+      allow write: if false;
+    }
+
+    match /brigades/{brigadeId} {
+      allow read: if isTechnicalAdmin() ||
+        (signedIn() && request.auth.token.brigadeIds is list &&
+          request.auth.token.brigadeIds.hasAny([brigadeId])) ||
+        (signedIn() && role() == 'incident_commander' &&
+          hasOperationalArea(resource.data.operationalAreaId));
+      allow write: if false;
+    }
+
+    match /operatorInvitations/{invitationId} {
+      allow read, write: if false;
+    }
+  }
+}

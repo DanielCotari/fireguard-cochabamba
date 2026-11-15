@@ -1,0 +1,9 @@
+data/raw/*.csv
+data/raw/*.json
+data/raw/*.zip
+data/raw/*.shp
+data/raw/*.shx
+data/raw/*.dbf
+data/raw/*.prj
+data/processed/
+__pycache__/

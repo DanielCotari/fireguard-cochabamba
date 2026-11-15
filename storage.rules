@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function reviewerInArea() {
+      return signedIn() &&
+        request.auth.token.role in ['brigade_leader', 'incident_commander'] &&
+        request.auth.token.operationalAreaIds is list;
+    }
+
+    match /report-images/{ownerUid}/{reportId} {
+      allow create: if signedIn()
+        && request.auth.uid == ownerUid
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)')
+        && request.resource.metadata.ownerUid == ownerUid
+        && request.resource.metadata.reportId == reportId
+        && request.resource.metadata.operationalAreaId == 'cochabamba-pilot';
+      allow get: if signedIn() && (
+        request.auth.uid == ownerUid ||
+        (reviewerInArea() &&
+          request.auth.token.operationalAreaIds.hasAny([resource.metadata.operationalAreaId]))
+      );
+      allow update, delete, list: if false;
+    }
+  }
+}
