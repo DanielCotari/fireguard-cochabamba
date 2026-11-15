@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "status": "awaiting_data",
+  "statusMessage": "Las solicitudes FIRMS para 2020–2023 fueron confirmadas el 14 de noviembre de 2026 y siguen pendientes de procesamiento y descarga. No se cargan resultados de demostración. Diciembre de 2023 permanece incompleto hasta confirmar y procesar su complemento de cobertura.",
+  "metadata": {
+    "areaName": "Bolivia · rectángulo de análisis piloto de Cochabamba",
+    "bbox": {
+      "west": -66.35,
+      "south": -17.55,
+      "east": -65.95,
+      "north": -17.15
+    },
+    "timezone": "UTC",
+    "period": {
+      "startYear": 2020,
+      "endYear": 2023
+    },
+    "calibration": {
+      "startYear": 2020,
+      "endYear": 2021
+    },
+    "evaluation": {
+      "startYear": 2022,
+      "endYear": 2023
+    },
+    "transitionMonth": "2022-01",
+    "units": "detecciones mensuales equivalentes a MODIS",
+    "referenceMinimumYears": 3,
+    "sources": [
+      {
+        "sensor": "MODIS",
+        "product": "MCD14ML",
+        "version": "Collection 6.1",
+        "satellites": "Terra + Aqua",
+        "url": "https://firms.modaps.eosdis.nasa.gov/download/"
+      },
+      {
+        "sensor": "VIIRS",
+        "product": "VIIRS S-NPP Active Fire (código por verificar)",
+        "version": "Collection 2 (solicitada; pendiente de verificar)",
+        "satellites": "Suomi-NPP",
+        "url": "https://firms.modaps.eosdis.nasa.gov/download/"
+      }
+    ],
+    "importSummary": {
+      "MODIS": {
+        "inputRows": 0,
+        "filteredRows": 0,
+        "uniqueRows": 0,
+        "duplicateRowsRemoved": 0
+      },
+      "VIIRS": {
+        "inputRows": 0,
+        "filteredRows": 0,
+        "uniqueRows": 0,
+        "duplicateRowsRemoved": 0
+      }
+    }
+  },
+  "harmonization": {
+    "factor": null,
+    "calibrationMonths": 0
+  },
+  "evaluation": {
+    "sampleCount": 0,
+    "minimumSamples": 12,
+    "before": {
+      "mae": null,
+      "bias": null
+    },
+    "after": {
+      "mae": null,
+      "bias": null
+    },
+    "quarterly": []
+  },
+  "monthly": []
+}
