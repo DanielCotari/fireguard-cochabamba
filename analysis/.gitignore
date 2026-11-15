@@ -1,4 +1,5 @@
 data/raw/*.csv
+data/raw/**/*.csv
 data/raw/*.json
 data/raw/*.zip
 data/raw/*.shp

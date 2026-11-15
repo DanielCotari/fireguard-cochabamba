@@ -8,7 +8,7 @@ La ruta `/` presenta la portada pública; `/overview` conserva el inicio interno
 
 - Node.js compatible con Expo SDK 58.
 - Python 3.10+ y pip para el procesamiento.
-- CSV históricos de FIRMS cuando estén disponibles. Las solicitudes actuales son para 2020–2023; aún no se han recibido archivos.
+- Python 3.10+ y pip para el procesamiento; los CSV históricos recibidos se guardan bajo `analysis/data/raw/`.
 
 ## Instalación y ejecución web
 
@@ -94,33 +94,30 @@ La primera versión implementa una brigada e integrante asignados por operación
 
 Ejecuta los comandos de esta sección desde la raíz del repositorio:
 
-1. Consultar [docs/data-sources.md](../docs/data-sources.md). Las solicitudes para Bolivia en formato CSV (MODIS Collection 6.1 y Suomi-NPP VIIRS Collection 2, 2020–2023) fueron confirmadas el 14 de noviembre de 2026 y siguen pendientes de procesamiento y descarga.
-2. Guardar los CSV separados por año y sensor en `analysis/data/raw/`, por ejemplo `modis_2020.csv` y `viirs_s_npp_2020.csv`. No subirlos al repositorio.
-3. Crear el manifiesto mensual y verificar productos y metadatos recibidos:
+1. Consultar [docs/data-sources.md](../docs/data-sources.md). Hay extractos FIRMS Archive adjuntos y NRT separados; no certifican cobertura completa. Las copias de trabajo están en `analysis/data/raw/` y esa carpeta está ignorada por Git.
+2. Para otras descargas, guardar los CSV separados por sensor en `analysis/data/raw/`; no subir las fuentes al repositorio.
+3. Crear o actualizar el manifiesto mensual y verificar productos y metadatos recibidos:
 
    ```powershell
    python analysis\src\process_data.py --create-coverage-template analysis\data\raw\coverage.csv
    ```
 
    El manifiesto tiene 96 filas. Confirmar producto/versión/satélite/fecha y el nombre del archivo fuente; cambiar `complete` a `true` solo para los meses con cobertura completa verificada. La solicitud de 2023 termina el 1 de diciembre: dejar diciembre incompleto hasta que se confirme y reciba el complemento al 31 de diciembre. Entonces marcar `december_2023_supplement_confirmed=true` en ambas filas de diciembre antes de marcarlo completo. Un mes sin detecciones solo será cero si consta como completo.
-4. Instalar la dependencia de procesamiento y generar el resultado web:
+4. Generar los resultados estáticos desde la raíz para los extractos adjuntos:
 
    ```powershell
-   python -m pip install -r analysis\requirements.txt
    python analysis\src\process_data.py `
-     --modis-csv analysis\data\raw\modis_2020.csv `
-     --modis-csv analysis\data\raw\modis_2021.csv `
-     --modis-csv analysis\data\raw\modis_2022.csv `
-     --modis-csv analysis\data\raw\modis_2023.csv `
-     --viirs-csv analysis\data\raw\viirs_s_npp_2020.csv `
-     --viirs-csv analysis\data\raw\viirs_s_npp_2021.csv `
-     --viirs-csv analysis\data\raw\viirs_s_npp_2022.csv `
-     --viirs-csv analysis\data\raw\viirs_s_npp_2023.csv `
-     --coverage-csv analysis\data\raw\coverage.csv
+     --modis-csv analysis\data\raw\fire_archive_M-C61_849210.csv `
+     --viirs-csv analysis\data\raw\fire_archive_SV-C2_849212.csv `
+     --coverage-csv analysis\data\coverage_attached.csv
    ```
 
-   Repetir cada opción de sensor solo para los archivos que existan. Los archivos se combinan por sensor, las duplicaciones idénticas se reportan y eliminan, y las claves duplicadas con atributos contradictorios detienen el proceso. El JSON se escribe en `mobile/public/data/fire-calendar.json`. Revisar sus metadatos y métricas antes de publicar.
-5. Desde `backend/functions`, revisar primero la importación sin escrituras. Para aplicar el resultado solo al emulador:
+   El manifiesto de estos extractos deja todos los meses incompletos. Se muestran conteos observados por sensor y puntos originales, pero no se calcula ni presenta una serie armonizada sin cobertura coincidente confirmada. Los archivos NRT quedan separados y no participan en el análisis histórico. El JSON se escribe en `mobile/public/data/fire-calendar.json` y las capas originales en `mobile/public/data/detections/`.
+
+   La aplicación sirve estos archivos estáticos cuando no hay calendario publicado en Firebase; no hace falta configurar ni desplegar Firebase para verlos. Ejecutar localmente con `Set-Location mobile; npm run web`.
+
+   Para procesar otras descargas completas, repetir cada opción del sensor solo para los archivos existentes y verificar los metadatos antes de completar meses. No convertir conteos observados en cobertura certificada.
+5. Si se configura Firebase, revisar primero la importación sin escrituras. Para aplicar el resultado solo al emulador:
 
    ```powershell
    npx firebase-tools emulators:exec --config ..\..\firebase.json --project demo-fireguard --only firestore "node scripts/import-satellite-results.mjs --project demo-fireguard"

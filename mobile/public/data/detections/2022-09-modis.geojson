@@ -1,0 +1,1 @@
+{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-66.164,-17.1582]},"properties":{"sensor":"MODIS","acq_date":"2022-09-11","acq_time":"1438","satellite":"Terra","version":"6.03","frp":12.2}}]}
