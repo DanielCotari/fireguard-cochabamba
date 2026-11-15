@@ -42,6 +42,11 @@ function getDate(feature: DetectionFeature) {
   return typeof value === 'string' ? value : 'La fecha no está incluida en esta capa.';
 }
 
+function getAcquisitionTime(feature: DetectionFeature) {
+  const value = feature.properties.acq_time ?? feature.properties.time;
+  return typeof value === 'string' ? value : null;
+}
+
 function formatCoordinate(value: number, positive: string, negative: string) {
   return `${Math.abs(value).toFixed(5)}° ${value < 0 ? negative : positive}`;
 }
@@ -160,7 +165,11 @@ export default function MapScreen() {
               Puntos MODIS y VIIRS del mes seleccionado. No son incendios confirmados ni una estimación de superficie quemada. El calendario muestra los agregados mensuales, no estos puntos.
             </Text>
           </View>
-          <Badge tone={hasCoverage ? 'calm' : 'attention'}>{hasCoverage ? 'CAPA DISPONIBLE' : 'COBERTURA PENDIENTE'}</Badge>
+          <Badge tone={hasCoverage && selected?.coverage === 'complete' ? 'calm' : 'attention'}>
+            {hasCoverage
+              ? selected?.coverage === 'complete' ? 'COBERTURA COMPLETA' : 'CAPA PARCIAL · COBERTURA NO CERTIFICADA'
+              : 'COBERTURA PENDIENTE'}
+          </Badge>
         </View>
 
         <View style={[styles.controls, compact && styles.controlsCompact]}>
@@ -205,10 +214,10 @@ export default function MapScreen() {
               <SensorLegend />
               <Text style={[styles.mapCaption, { color: colors.inkMuted }]}>
                 Procedencia: {data.metadata.sources.length
-                  ? data.metadata.sources.map((source) => `${source.sensor} · ${source.product} · ${source.satellites}`).join(' · ')
+                  ? data.metadata.sources.map((source) => `${source.sensor} · ${source.product} · ${source.satellites}${source.algorithmVersions?.length ? ` · versiones ${source.algorithmVersions.join('/')}` : ''}${source.sourceFiles?.length ? ` · fuente ${source.sourceFiles.join(', ')}` : ''}`).join(' · ')
                   : 'NASA FIRMS · MODIS y VIIRS'}.
-                {importId ? ` Publicación ${importId}.` : ' Sin publicación remota: se usa el archivo local, actualmente sin puntos.'}
-                {' '}Los puntos son detecciones originales. Los totales mensuales armonizados están en el calendario.
+                {importId ? ` Publicación ${importId}.` : ' Integración estática desde los archivos locales procesados.'}
+                {' '}Los puntos y conteos son por sensor. La serie equivalente a MODIS solo se publica tras una armonización evaluada.
               </Text>
             </Card>
             {nextCursor ? (
@@ -245,12 +254,24 @@ export default function MapScreen() {
                   <View style={[styles.detailRule, { backgroundColor: colors.line }]} />
                   <Text style={[styles.detailLabel, { color: colors.inkSubtle }]}>FECHA REGISTRADA</Text>
                   <Text style={[styles.detailValue, { color: colors.ink }]}>{getDate(selectedDetection)}</Text>
+                  {getAcquisitionTime(selectedDetection) ? (
+                    <>
+                      <Text style={[styles.detailLabel, { color: colors.inkSubtle }]}>HORA DE ADQUISICIÓN UTC</Text>
+                      <Text style={[styles.detailValue, { color: colors.ink }]}>{getAcquisitionTime(selectedDetection)}</Text>
+                    </>
+                  ) : null}
                   <Text style={[styles.detailLabel, { color: colors.inkSubtle }]}>COORDENADAS</Text>
                   <Text style={[styles.detailValue, { color: colors.ink }]}>
                     {formatCoordinate(selectedDetection.geometry.coordinates[1], 'N', 'S')} · {formatCoordinate(selectedDetection.geometry.coordinates[0], 'E', 'O')}
                   </Text>
                   <Text style={[styles.detailLabel, { color: colors.inkSubtle }]}>PRODUCTO</Text>
                   <Text style={[styles.detailValue, { color: colors.ink }]}>Observación satelital original</Text>
+                  {typeof selectedDetection.properties.version === 'string' ? (
+                    <>
+                      <Text style={[styles.detailLabel, { color: colors.inkSubtle }]}>VERSIÓN DE ORIGEN</Text>
+                      <Text style={[styles.detailValue, { color: colors.ink }]}>{selectedDetection.properties.version}</Text>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <EmptyState variant="noData" title="Sin punto seleccionado">

@@ -1,0 +1,1 @@
+{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-66.11829,-17.42834]},"properties":{"sensor":"VIIRS","acq_date":"2020-02-14","acq_time":"0538","satellite":"SNPP","version":"2","frp":0.46}}]}

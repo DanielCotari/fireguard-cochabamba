@@ -141,6 +141,11 @@ export default function CalendarScreen() {
             </Pressable>
           </View>
         ) : null}
+        {data.status === 'insufficient' ? (
+          <EmptyState variant="pending" title="Conteos observados · cobertura incompleta y armonización pendiente">
+            {data.statusMessage} Se muestran detecciones filtradas por sensor; no equivalen a cobertura mensual completa ni se suman entre sensores.
+          </EmptyState>
+        ) : null}
         <View style={[styles.mainGrid, compact && styles.mainGridCompact]}>
           <View style={styles.primary}>
             <Card>
@@ -222,12 +227,16 @@ export default function CalendarScreen() {
                 copy="Los conteos originales y el valor publicado se leen solo cuando existen en los resultados. El control no recalcula el factor."
                 colors={colors}
               />
-              <Button
-                label={showHarmonized ? 'Ocultar efecto de la armonización' : 'Ver efecto de la armonización'}
-                variant={showHarmonized ? 'primary' : 'secondary'}
-                accessibilityLabel="Ver efecto de la armonización"
-                onPress={() => setShowHarmonized((current) => !current)}
-              />
+              {data.harmonization?.factor != null ? (
+                <Button
+                  label={showHarmonized ? 'Ocultar efecto de la armonización' : 'Ver efecto de la armonización'}
+                  variant={showHarmonized ? 'primary' : 'secondary'}
+                  accessibilityLabel="Ver efecto de la armonización"
+                  onPress={() => setShowHarmonized((current) => !current)}
+                />
+              ) : (
+                <Text style={[styles.chartFootnote, { color: colors.attention }]}>Armonización pendiente: el factor no está disponible.</Text>
+              )}
               <Text style={[styles.chartFootnote, { color: colors.inkMuted }]}>
                 Calibración {data.metadata.calibration ? `${data.metadata.calibration.startYear}–${data.metadata.calibration.endYear}` : 'no indicada'}.
                 Evaluación {data.metadata.evaluation ? `${data.metadata.evaluation.startYear}–${data.metadata.evaluation.endYear}` : 'no indicada'}.

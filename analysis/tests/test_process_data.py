@@ -109,6 +109,47 @@ class FireDataProcessingTests(unittest.TestCase):
         self.assertEqual(january_2022["coverage"], "incomplete")
         self.assertIsNone(january_2022["final_source"])
 
+    def test_partial_sensor_counts_keep_algorithm_versions_without_claiming_completeness(self):
+        modis = pd.DataFrame(
+            observation("2020-01-03", "MODIS", 1, 60, "Terra")
+            + observation("2020-01-04", "MODIS", 1, 60, "Aqua")
+        )
+        modis.loc[0, "acq_time"] = "0306"
+        modis["version"] = ["6.03", "61.03"]
+        viirs = pd.DataFrame(observation("2020-01-03", "VIIRS", 1, "n", "Suomi-NPP"))
+        viirs["version"] = "2"
+        result = process_data.build_results(
+            modis,
+            viirs,
+            pd.DataFrame([
+                coverage_row("MODIS", 2020, 1, complete=False),
+                coverage_row("VIIRS", 2020, 1, complete=False),
+            ]),
+        )
+
+        january = next(row for row in result["monthly"] if (row["year"], row["month"]) == (2020, 1))
+        self.assertEqual(january["modis_count"], 2)
+        self.assertEqual(january["viirs_count"], 1)
+        self.assertEqual(january["coverage"], "incomplete")
+        self.assertIsNone(january["final_value"])
+        self.assertIsNone(result["harmonization"]["factor"])
+        modis_source = next(source for source in result["metadata"]["sources"] if source["sensor"] == "MODIS")
+        self.assertEqual(modis_source["algorithmVersions"], ["6.03", "61.03"])
+
+        prepared = {
+            "MODIS": process_data._prepare_observations(modis, "MODIS"),
+            "VIIRS": process_data._prepare_observations(viirs, "VIIRS"),
+        }
+        coverage = process_data._normalize_coverage(pd.DataFrame([
+            coverage_row("MODIS", 2020, 1, complete=False),
+            coverage_row("VIIRS", 2020, 1, complete=False),
+        ]))
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            process_data.write_detection_files(prepared, coverage, Path(temporary_directory))
+            points = Path(temporary_directory, "2020-01-modis.geojson").read_text(encoding="utf-8")
+        self.assertIn('"version":"6.03"', points)
+        self.assertIn('"acq_time":"0306"', points)
+
     def test_zero_viirs_calibration_denominator_leaves_factor_unavailable(self):
         result = self.build(
             observation("2020-01-03", "MODIS", 1, 60, "Terra"),

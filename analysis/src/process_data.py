@@ -56,7 +56,7 @@ def _metadata_token(value: Any) -> str:
 def _validate_product(sensor: str, product: Any, context: str) -> None:
     allowed_products = {
         "MODIS": {"MCD14ML"},
-        "VIIRS": {"VNP14IMGTML", "VNP14IMGML"},
+        "VIIRS": {"VNP14IMGTML", "VNP14IMGML", "FIRMSSVC2ARCHIVE"},
     }
     if _metadata_token(product) not in allowed_products[sensor]:
         raise ValueError(f"{context}: producto {product!r} no corresponde a {sensor} Collection solicitada.")
@@ -100,6 +100,13 @@ def _validate_observation_metadata(observations: pd.DataFrame, sensor: str) -> N
         versions = observations[version_column].dropna().astype(str).str.strip()
         versions = versions[versions.ne("")]
         if not versions.empty:
+            if sensor == "MODIS" and version_column == "version":
+                algorithm_versions = {_metadata_token(version) for version in versions}
+                if not algorithm_versions.issubset({"603", "6103"}):
+                    raise ValueError(
+                        f"CSV de MODIS: etiqueta de algoritmo desconocida: {', '.join(sorted(algorithm_versions))}."
+                    )
+                continue
             if versions.nunique() != 1:
                 raise ValueError(f"CSV de {sensor}: se mezclan versiones de producto.")
             _validate_version(sensor, versions.iloc[0], f"CSV de {sensor}")
@@ -144,7 +151,11 @@ def _normalize_coverage(coverage: pd.DataFrame) -> dict[tuple[str, int, int], di
         frame[column] = frame[column].fillna("").astype(str).str.strip()
         if frame[column].eq("").any():
             raise ValueError(f"coverage.csv debe indicar {column} en todas sus filas.")
-    download_dates = frame["download_date"].fillna("").astype(str).str.strip()
+    frame["download_date"] = frame["download_date"].fillna("").astype(str).str.strip()
+    if "source_file" not in frame:
+        frame["source_file"] = ""
+    frame["source_file"] = frame["source_file"].fillna("").astype(str).str.strip()
+    download_dates = frame["download_date"]
     if (frame["complete"] & download_dates.eq("")).any():
         raise ValueError("coverage.csv debe indicar la fecha de descarga de cada mes marcado como completo.")
 
@@ -368,12 +379,20 @@ def build_results(
         viirs_coverage_row = coverage.get(("VIIRS", year, month))
         modis_complete = bool(modis_coverage_row and modis_coverage_row["complete"])
         viirs_complete = bool(viirs_coverage_row and viirs_coverage_row["complete"])
-        modis_count = modis.get((year, month), {}).get("count", 0) if modis_complete else None
-        viirs_count = viirs.get((year, month), {}).get("count", 0) if viirs_complete else None
-        adjusted_count = viirs_count * factor if viirs_count is not None and factor is not None else None
+        modis_observed = modis.get((year, month))
+        viirs_observed = viirs.get((year, month))
+        modis_count = (
+            modis_observed["count"] if modis_observed is not None
+            else 0 if modis_complete else None
+        )
+        viirs_count = (
+            viirs_observed["count"] if viirs_observed is not None
+            else 0 if viirs_complete else None
+        )
+        adjusted_count = viirs_count * factor if viirs_complete and viirs_count is not None and factor is not None else None
         before_transition = f"{year:04d}-{month:02d}" < TRANSITION_MONTH
         final_source = "MODIS" if before_transition else "VIIRS ajustado"
-        final_count = modis_count if before_transition else adjusted_count
+        final_count = (modis_count if modis_complete else None) if before_transition else adjusted_count
         selected_coverage_row = modis_coverage_row if before_transition else viirs_coverage_row
         coverage_state = (
             "missing" if selected_coverage_row is None else
@@ -396,8 +415,8 @@ def build_results(
                 "reference_delta": None,
                 "frp_modis_sum": _monthly_frp(modis, (year, month), modis_complete),
                 "frp_viirs_sum": _monthly_frp(viirs, (year, month), viirs_complete),
-                "modis_geojson": f"/data/detections/{year}-{month:02d}-modis.geojson" if modis_complete else None,
-                "viirs_geojson": f"/data/detections/{year}-{month:02d}-viirs.geojson" if viirs_complete else None,
+                "modis_geojson": f"/data/detections/{year}-{month:02d}-modis.geojson" if modis_complete or modis_observed is not None else None,
+                "viirs_geojson": f"/data/detections/{year}-{month:02d}-viirs.geojson" if viirs_complete or viirs_observed is not None else None,
             }
         )
 
@@ -425,6 +444,11 @@ def build_results(
                     "product": source["product"],
                     "version": source["version"],
                     "satellites": source["satellites"],
+                    "algorithmVersions": sorted({
+                        str(value).strip()
+                        for value in (modis_prepared if sensor == "MODIS" else viirs_prepared).get("version", pd.Series(dtype=str)).dropna()
+                        if str(value).strip()
+                    }),
                     "downloadDates": sorted({str(row["download_date"]) for row in sensor_rows if str(row["download_date"]).strip()}),
                     "sourceFiles": sorted({str(row.get("source_file", "")) for row in sensor_rows if row.get("source_file")}),
                     "url": "https://firms.modaps.eosdis.nasa.gov/download/",
@@ -458,7 +482,11 @@ def build_results(
             "calibration": {"startYear": CALIBRATION_START, "endYear": CALIBRATION_END},
             "evaluation": {"startYear": EVALUATION_START, "endYear": EVALUATION_END},
             "transitionMonth": TRANSITION_MONTH,
-            "units": "detecciones mensuales equivalentes a MODIS",
+            "units": (
+                "conteo de detecciones originales por sensor; sin suma entre sensores"
+                if factor is None
+                else "detecciones mensuales equivalentes a MODIS"
+            ),
             "referenceMinimumYears": REFERENCE_MINIMUM_YEARS,
             "confidenceFilters": {
                 "MODIS": "numeric confidence >= 30",
@@ -532,11 +560,11 @@ def write_detection_files(
 ) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for (sensor, year, month), coverage_row in coverage.items():
-        if not coverage_row["complete"]:
-            continue
         frame = observations[sensor]
         dates = pd.to_datetime(frame["acq_date"], utc=True)
         month_rows = frame.loc[(dates.dt.year == year) & (dates.dt.month == month)]
+        if not coverage_row["complete"] and month_rows.empty:
+            continue
         features = []
         for row in month_rows.itertuples(index=False):
             features.append(
@@ -548,9 +576,10 @@ def write_detection_files(
                     },
                     "properties": {
                         "sensor": sensor,
-                        "date": row.acq_date,
-                        "time": row.acq_time,
+                        "acq_date": row.acq_date,
+                        "acq_time": row.acq_time,
                         "satellite": row.satellite,
+                        "version": getattr(row, "version", None),
                         "frp": float(row.frp) if pd.notna(row.frp) else None,
                     },
                 }

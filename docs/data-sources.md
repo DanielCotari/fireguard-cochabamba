@@ -1,10 +1,14 @@
 # Fuentes y estado de los datos
 
-## Descarga pendiente
+## Archivos recibidos y cobertura
 
-Las solicitudes a NASA FIRMS fueron confirmadas el 14 de noviembre de 2026 y siguen pendientes de procesamiento y descarga. Todavía no hay CSV ni resultados reales en el repositorio. La página oficial de archivo FIRMS indica que las descargas históricas requieren iniciar sesión con Earthdata o validar un código enviado por correo. No se guardan credenciales ni se usan datos sintéticos.
+Se recibieron los archivos `fire_archive_M-C61_849210.csv` y `fire_archive_SV-C2_849212.csv`, más `fire_nrt_M-C61_849210.csv` y `fire_nrt_SV-C2_849212.csv`. Se conservaron copias locales bajo `analysis/data/raw/` (NRT en `analysis/data/raw/nrt/`); esas rutas están ignoradas por Git. No se modificaron los adjuntos originales. Los CSV no indican fecha de descarga ni certifican cobertura mensual.
 
-La solicitud se hizo para Bolivia en formato CSV. El análisis del prototipo se limita al rectángulo de Cochabamba descrito abajo: los registros fuera del rectángulo se descartan durante el procesamiento. La fecha real de descarga y la cobertura mensual se completarán al recibir los archivos.
+Con el filtro inclusivo 2020–2023 y el rectángulo de Cochabamba, el procesador retuvo 148 detecciones MODIS y 709 VIIRS después de aplicar filtros distintos por sensor. Hay registros observados en 27 meses MODIS y 46 meses VIIRS; son conteos de los archivos recibidos, no prueba de cobertura completa. La capa contiene 857 puntos originales. Los adjuntos NRT contienen fechas de 2026, fuera del periodo, y no entraron en agregados ni calibración.
+
+MODIS tiene etiquetas de algoritmo `6.03` y `61.03`; se preservan por punto y en los metadatos de procedencia, sin fusionarlas en una sola versión. VIIRS declara versión `2`. El CSV VIIRS no incluye un identificador de producto más específico que `SV-C2`, por lo que la procedencia se etiqueta con ese nombre de archivo; el identificador de producto oficial queda por verificar. La página oficial de archivo FIRMS indica que otras descargas históricas requieren iniciar sesión con Earthdata o validar un código enviado por correo. No se guardan credenciales ni se usan datos sintéticos.
+
+El manifiesto versionado `analysis/data/coverage_attached.csv` conserva los 96 meses como incompletos porque los archivos no certifican cobertura. Por ello no se calculó factor de armonización, métricas ni una serie equivalente a MODIS. La aplicación muestra los conteos originales por sensor, mantiene vacíos los meses sin registros y marca la cobertura como parcial; no convierte faltantes en cero.
 
 ## Productos solicitados
 

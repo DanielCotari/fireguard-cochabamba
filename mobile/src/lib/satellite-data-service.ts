@@ -34,7 +34,14 @@ export type SatelliteCalendar = {
     period: { startYear: number; endYear: number };
     bbox: { west: number; south: number; east: number; north: number };
     areaName: string;
-    sources: { sensor: string; product: string; satellites: string }[];
+    sources: {
+      sensor: string;
+      product: string;
+      satellites: string;
+      version?: string;
+      algorithmVersions?: string[];
+      sourceFiles?: string[];
+    }[];
     calibration?: { startYear: number; endYear: number };
     evaluation?: { startYear: number; endYear: number };
     transitionMonth?: string;
@@ -103,15 +110,7 @@ export async function loadPublishedCalendar(fallback: SatelliteCalendar): Promis
   if (!db) return { calendar: fallback, importId: null };
   const configSnapshot = await getDoc(doc(db, 'publicConfig', 'satellite'));
   if (!configSnapshot.exists()) {
-    return {
-      calendar: {
-        ...fallback,
-        status: 'awaiting_data',
-        statusMessage: 'No hay resultados satelitales publicados en Firebase.',
-        monthly: [],
-      },
-      importId: null,
-    };
+    return { calendar: fallback, importId: null };
   }
 
   const config = configSnapshot.data();
@@ -152,7 +151,18 @@ export async function loadPublishedCalendar(fallback: SatelliteCalendar): Promis
         sources: Array.isArray(config.metadata.sources)
           ? config.metadata.sources.filter(isRecord).flatMap((source) =>
             typeof source.sensor === 'string' && typeof source.product === 'string' && typeof source.satellites === 'string'
-              ? [{ sensor: source.sensor, product: source.product, satellites: source.satellites }]
+              ? [{
+                sensor: source.sensor,
+                product: source.product,
+                satellites: source.satellites,
+                ...(typeof source.version === 'string' ? { version: source.version } : {}),
+                ...(Array.isArray(source.algorithmVersions)
+                  ? { algorithmVersions: source.algorithmVersions.filter((version): version is string => typeof version === 'string') }
+                  : {}),
+                ...(Array.isArray(source.sourceFiles)
+                  ? { sourceFiles: source.sourceFiles.filter((file): file is string => typeof file === 'string') }
+                  : {}),
+              }]
               : [],
           )
           : [],
