@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Badge, Button, Card, EmptyState, useAtlasTheme } from '@/components/atlas-ui';
 import { useAuth, type AppRole } from '@/lib/auth-context';
-import { requestPasswordReset, registerCitizen, signIn, signOutCurrentUser } from '@/lib/auth-service';
+import { requestPasswordReset, registerCitizen, resumeCitizenRegistration, signIn, signOutCurrentUser } from '@/lib/auth-service';
 import { breakpoints, dimensions, radii, spacing, typography } from '@/theme/tokens';
 
 type FormMode = 'sign_in' | 'register' | 'reset';
@@ -31,7 +31,7 @@ function messageForAuthError(error: unknown) {
     'auth/weak-password': 'La contraseña debe tener al menos 6 caracteres.',
     'auth/operation-not-allowed': 'El inicio de sesión por correo no está habilitado en Firebase.',
   };
-  return messages[code] ?? 'No se pudo completar la operación. Inténtalo nuevamente.';
+  return messages[code] ?? (error instanceof Error ? error.message : 'No se pudo completar la operación. Inténtalo nuevamente.');
 }
 
 function pathForClaims(claims: Record<string, unknown>): AuthPath {
@@ -115,7 +115,7 @@ export default function ProfileScreen() {
   const wide = width >= breakpoints.desktopNavigation;
   const compact = width < breakpoints.compact;
   const { colors } = useAtlasTheme();
-  const { user, role, technicalAdmin, configured, loading: authLoading } = useAuth();
+  const { user, role, technicalAdmin, configured, accessActive, accessError, loading: authLoading } = useAuth();
   const [mode, setMode] = useState<FormMode>('sign_in');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -187,6 +187,24 @@ export default function ProfileScreen() {
     }
   };
 
+  const retryRegistration = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      if (mode === 'register' && name.trim() && email.trim() && password) {
+        await registerCitizen(name, email, password, phone);
+      } else {
+        await resumeCitizenRegistration();
+      }
+      setNotice({ text: 'El acceso y el perfil quedaron confirmados.', error: false });
+      router.replace('/report');
+    } catch (error) {
+      setNotice({ text: messageForAuthError(error), error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const pageTitle = mode === 'register' ? 'Crear cuenta ciudadana' : mode === 'reset' ? 'Recuperar contraseña' : 'Iniciar sesión';
   const roleLabel = technicalAdmin ? 'Administrador técnico' : role === 'citizen' ? 'Ciudadano' : role === 'visitor' ? 'Visitante' : 'Operador autorizado';
 
@@ -214,6 +232,16 @@ export default function ProfileScreen() {
               <ActivityIndicator color={colors.attention} />
               <Text style={[styles.body, { color: colors.inkMuted }]}>Comprobando sesión…</Text>
             </View>
+          ) : user && !accessActive ? (
+            <>
+              <Text style={[styles.kicker, { color: colors.attention }]}>ALTA PENDIENTE</Text>
+              <Text style={[styles.formTitle, { color: colors.ink }]}>Completar acceso</Text>
+              <Text style={[styles.body, { color: colors.inkMuted }]}>
+                {accessError || 'El servidor todavía no confirmó el acceso de esta cuenta.'}
+              </Text>
+              <Button label={busy ? 'Reintentando…' : 'Reintentar alta y perfil'} disabled={busy} onPress={() => void retryRegistration()} />
+              <Button label="Cerrar sesión" variant="secondary" disabled={busy} onPress={() => void logout()} />
+            </>
           ) : user ? (
             <>
               <Text style={[styles.kicker, { color: colors.attention }]}>TU ESPACIO FIREGUARD</Text>

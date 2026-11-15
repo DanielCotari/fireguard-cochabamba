@@ -11,7 +11,7 @@ const FEATURES = [
 
 function ContourDrawing({ color }: { color: string }) {
   return (
-    <View accessibilityLabel="Ilustración topográfica; no representa detecciones" style={[styles.contourCanvas, { backgroundColor: colorScale.bone[200] }]}>
+    <View accessibilityLabel="Ilustración topográfica; no representa detecciones" style={[styles.contourCanvas, { backgroundColor: colorScale.ink[50] }]}>
       <View style={[styles.gridLine, styles.gridHorizontalTop, { backgroundColor: color }]} />
       <View style={[styles.gridLine, styles.gridHorizontalBottom, { backgroundColor: color }]} />
       <View style={[styles.gridLine, styles.gridVerticalLeft, { backgroundColor: color }]} />
@@ -24,9 +24,9 @@ function ContourDrawing({ color }: { color: string }) {
       <View style={styles.ember}>
         <View style={styles.emberCore} />
       </View>
-      <Text style={[styles.contourCoordinate, { color: colorScale.ash[700] }]}>17° 23′ S</Text>
-      <Text style={[styles.contourCoordinateEast, { color: colorScale.ash[700] }]}>66° 09′ O</Text>
-      <Text style={[styles.contourCaption, { color: colorScale.ash[700] }]}>LÁMINA 01 · VALLE CENTRAL</Text>
+      <Text style={[styles.contourCoordinate, { color: colorScale.ink[700] }]}>17° 23′ S</Text>
+      <Text style={[styles.contourCoordinateEast, { color: colorScale.ink[700] }]}>66° 09′ O</Text>
+      <Text style={[styles.contourCaption, { color: colorScale.ink[700] }]}>LÁMINA 01 · VALLE CENTRAL</Text>
     </View>
   );
 }

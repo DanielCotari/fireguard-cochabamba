@@ -5,26 +5,21 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function reviewerInArea() {
-      return signedIn() &&
-        request.auth.token.role in ['brigade_leader', 'incident_commander'] &&
-        request.auth.token.operationalAreaIds is list;
+    function activeAccount(uid) {
+      return signedIn()
+        && firestore.get(/databases/(default)/documents/access/$(uid)).data.active == true;
     }
 
-    match /report-images/{ownerUid}/{reportId} {
-      allow create: if signedIn()
-        && request.auth.uid == ownerUid
+    match /reportPhotos/{uid}/{reportId}/original {
+      allow create: if activeAccount(uid)
+        && request.auth.uid == uid
+        && resource == null
         && request.resource.size > 0
         && request.resource.size <= 5 * 1024 * 1024
         && request.resource.contentType.matches('image/(jpeg|png|webp)')
-        && request.resource.metadata.ownerUid == ownerUid
-        && request.resource.metadata.reportId == reportId
-        && request.resource.metadata.operationalAreaId == 'cochabamba-pilot';
-      allow get: if signedIn() && (
-        request.auth.uid == ownerUid ||
-        (reviewerInArea() &&
-          request.auth.token.operationalAreaIds.hasAny([resource.metadata.operationalAreaId]))
-      );
+        && request.resource.metadata.authorId == uid
+        && request.resource.metadata.reportId == reportId;
+      allow get: if activeAccount(uid) && request.auth.uid == uid;
       allow update, delete, list: if false;
     }
   }

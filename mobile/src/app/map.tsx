@@ -7,19 +7,8 @@ import type { DetectionCollection } from '@/components/detection-map-types';
 import { useSatelliteSelection } from '@/lib/satellite-selection';
 import { breakpoints, dimensions, radii, spacing, typography } from '@/theme/tokens';
 import { pilotArea, formatPilotExtent } from '@/constants/pilot-area';
+import { loadPublishedCalendar, loadPublishedDetections, type SatelliteCalendar } from '@/lib/satellite-data-service';
 import fireCalendar from '../../public/data/fire-calendar.json';
-
-type MonthSources = {
-  year: number;
-  month: number;
-  modis_geojson: string | null;
-  viirs_geojson: string | null;
-};
-
-type FireCalendar = {
-  metadata: { period: { startYear: number; endYear: number } };
-  monthly: MonthSources[];
-};
 
 type Sensor = 'MODIS' | 'VIIRS';
 type DetectionFeature = DetectionCollection['features'][number];
@@ -62,14 +51,29 @@ export default function MapScreen() {
   const compact = width < breakpoints.compact;
   const { colors } = useAtlasTheme();
   const { year, month, setSelection } = useSatelliteSelection();
-  const data = fireCalendar as FireCalendar;
+  const fallback = fireCalendar as unknown as SatelliteCalendar;
+  const [data, setData] = useState<SatelliteCalendar>(fallback);
+  const [importId, setImportId] = useState<string | null>(null);
   const { startYear, endYear } = data.metadata.period;
   const monthly = data.monthly;
   const [detections, setDetections] = useState<DetectionCollection | null>(null);
   const [selectedDetection, setSelectedDetection] = useState<DetectionFeature | null>(null);
   const [visibleSensors, setVisibleSensors] = useState<Sensor[]>(['MODIS', 'VIIRS']);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    loadPublishedCalendar(fallback).then((published) => {
+      if (!active) return;
+      setData(published.calendar);
+      setImportId(published.importId);
+    }).catch((error: unknown) => {
+      if (active) setMessage(error instanceof Error ? error.message : 'No se pudo consultar la publicación satelital.');
+    });
+    return () => { active = false; };
+  }, [fallback]);
   const selected = useMemo(
     () => monthly.find((item) => item.year === year && item.month === month) ?? null,
     [month, monthly, year],
@@ -83,18 +87,26 @@ export default function MapScreen() {
       setMessage(null);
       setDetections(null);
       setSelectedDetection(null);
+      setNextCursor(null);
       if (!selected) {
         setLoading(false);
         return;
       }
       try {
-        const [modis, viirs] = await Promise.all([
-          loadCollection(selected.modis_geojson),
-          loadCollection(selected.viirs_geojson),
-        ]);
-        if (!active) return;
-        const features = [...(modis?.features ?? []), ...(viirs?.features ?? [])];
-        setDetections(features.length ? { type: 'FeatureCollection', features } : null);
+        if (importId) {
+          const page = await loadPublishedDetections(year, month, importId);
+          if (!active) return;
+          setDetections(page.detections);
+          setNextCursor(page.nextCursor);
+        } else {
+          const [modis, viirs] = await Promise.all([
+            loadCollection(selected.modis_geojson),
+            loadCollection(selected.viirs_geojson),
+          ]);
+          if (!active) return;
+          const features = [...(modis?.features ?? []), ...(viirs?.features ?? [])];
+          setDetections(features.length ? { type: 'FeatureCollection', features } : null);
+        }
       } catch (error: unknown) {
         if (active) setMessage(error instanceof Error ? error.message : 'No se pudieron cargar las detecciones originales.');
       } finally {
@@ -103,7 +115,25 @@ export default function MapScreen() {
     };
     void loadSelectedMonth();
     return () => { active = false; };
-  }, [selected]);
+  }, [importId, month, selected, year]);
+
+  const loadMore = async () => {
+    if (!selected || !importId || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setMessage(null);
+    try {
+      const page = await loadPublishedDetections(year, month, importId, nextCursor);
+      setDetections((current) => {
+        const features = [...(current?.features ?? []), ...(page.detections?.features ?? [])];
+        return features.length ? { type: 'FeatureCollection', features } : null;
+      });
+      setNextCursor(page.nextCursor);
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo cargar la siguiente página de detecciones.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const displayedDetections = useMemo(() => {
     if (!detections) return null;
@@ -121,13 +151,13 @@ export default function MapScreen() {
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: colors.canvas }]} contentContainerStyle={styles.pageContent}>
-      <View style={styles.container}>
+        <View style={[styles.container, compact && styles.containerCompact]}>
         <View style={[styles.header, compact && styles.headerCompact]}>
           <View style={styles.heading}>
-            <Text style={[styles.kicker, { color: colors.attention }]}>ATLAS DE CAMPO / 01</Text>
-            <Text style={[styles.title, { color: colors.ink }]}>Mapa de observaciones</Text>
+            <Text style={[styles.kicker, { color: colors.inkSubtle }]}>DETECCIONES ORIGINALES</Text>
+            <Text style={[styles.title, { color: colors.ink }]}>Mapa de focos de calor</Text>
             <Text style={[styles.description, { color: colors.inkMuted }]}>
-              Capas originales de focos de calor. No equivalen a incendios confirmados ni a una estimación de superficie quemada.
+              Puntos MODIS y VIIRS del mes seleccionado. No son incendios confirmados ni una estimación de superficie quemada. El calendario muestra los agregados mensuales, no estos puntos.
             </Text>
           </View>
           <Badge tone={hasCoverage ? 'calm' : 'attention'}>{hasCoverage ? 'CAPA DISPONIBLE' : 'COBERTURA PENDIENTE'}</Badge>
@@ -166,16 +196,29 @@ export default function MapScreen() {
             <View style={[styles.mapFrame, { backgroundColor: colors.surface, borderColor: colors.line }]}>
               <DetectionMap height={compact ? dimensions.mapHeightCompact : dimensions.mapHeightWide} detections={displayedDetections} onDetectionSelect={setSelectedDetection} />
               <View style={[styles.mapStamp, { backgroundColor: colors.surfaceRaised, borderColor: colors.line }]}>
-                <Text style={[styles.stampText, { color: colors.calm }]}>RECTÁNGULO PILOTO</Text>
-                <Text style={[styles.stampCoordinates, { color: colors.inkMuted }]}>{formatPilotExtent()}</Text>
+                <Text style={[styles.stampText, { color: colors.ink }]}>ÁREA DE ANÁLISIS</Text>
+                <Text style={[styles.stampCoordinates, { color: colors.inkMuted }]}>{data.metadata.areaName}</Text>
+                <Text style={[styles.stampCoordinates, { color: colors.inkMuted }]}>{formatPilotExtent(data.metadata.bbox ?? pilotArea)}</Text>
               </View>
             </View>
             <Card>
               <SensorLegend />
               <Text style={[styles.mapCaption, { color: colors.inkMuted }]}>
-                El borde señala el rectángulo de análisis piloto de Cochabamba; no representa límites oficiales. La armonización no elimina todas las diferencias entre sensores.
+                Procedencia: {data.metadata.sources.length
+                  ? data.metadata.sources.map((source) => `${source.sensor} · ${source.product} · ${source.satellites}`).join(' · ')
+                  : 'NASA FIRMS · MODIS y VIIRS'}.
+                {importId ? ` Publicación ${importId}.` : ' Sin publicación remota: se usa el archivo local, actualmente sin puntos.'}
+                {' '}Los puntos son detecciones originales. Los totales mensuales armonizados están en el calendario.
               </Text>
             </Card>
+            {nextCursor ? (
+              <Button
+                label={loadingMore ? 'Cargando…' : 'Cargar más detecciones'}
+                variant="secondary"
+                disabled={loadingMore}
+                onPress={() => void loadMore()}
+              />
+            ) : null}
             {message ? <EmptyState variant="noData" title="No se pudo actualizar el mapa">{message}</EmptyState> : null}
             {!message && !loading && !hasCoverage ? (
               <EmptyState variant="pending" title="Este mes está pendiente">
@@ -194,7 +237,7 @@ export default function MapScreen() {
 
           <View style={[styles.detailColumn, compact && styles.detailColumnCompact]}>
             <Card>
-              <Text style={[styles.detailKicker, { color: colors.attention }]}>FICHA DE OBSERVACIÓN</Text>
+              <Text style={[styles.detailKicker, { color: colors.inkSubtle }]}>DETECCIÓN SELECCIONADA</Text>
               {selectedDetection ? (
                 <>
                   <Text style={[styles.detailTitle, { color: colors.ink }]}>Punto seleccionado</Text>
@@ -236,12 +279,13 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   page: { flex: 1 },
   pageContent: { paddingBottom: spacing.xxl },
-  container: { width: '100%', maxWidth: dimensions.wideContent, alignSelf: 'center', paddingHorizontal: spacing.xl, gap: spacing.lg },
-  header: { minHeight: dimensions.mapHeaderHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+  container: { width: '100%', maxWidth: dimensions.wideContent, alignSelf: 'center', paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.md },
+  containerCompact: { paddingHorizontal: spacing.md },
+  header: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },
   headerCompact: { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', paddingVertical: spacing.lg },
   heading: { flex: 1, gap: spacing.xs },
   kicker: { fontFamily: typography.family.mono, fontSize: typography.size.caption, fontWeight: '700', letterSpacing: 1 },
-  title: { fontFamily: typography.family.editorial, fontSize: typography.size.heading, fontWeight: '400' },
+  title: { fontFamily: typography.family.sans, fontSize: typography.size.heading, fontWeight: '700' },
   description: { maxWidth: dimensions.mapDescriptionWidth, fontFamily: typography.family.sans, fontSize: typography.size.small, lineHeight: typography.lineHeight.body },
   controls: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.md },
   controlsCompact: { flexDirection: 'column' },
@@ -264,7 +308,7 @@ const styles = StyleSheet.create({
   mapCaption: { fontFamily: typography.family.sans, fontSize: typography.size.caption, lineHeight: typography.lineHeight.body },
   loading: { fontFamily: typography.family.sans, fontSize: typography.size.small },
   detailKicker: { fontFamily: typography.family.mono, fontSize: typography.size.caption, fontWeight: '800', letterSpacing: 1 },
-  detailTitle: { fontFamily: typography.family.editorial, fontSize: typography.size.subheading },
+  detailTitle: { fontFamily: typography.family.sans, fontSize: typography.size.body, fontWeight: '700' },
   detailRule: { height: dimensions.hairline, marginVertical: spacing.xs },
   detailLabel: { fontFamily: typography.family.mono, fontSize: typography.size.caption, fontWeight: '700', letterSpacing: 0.6 },
   detailValue: { fontFamily: typography.family.sans, fontSize: typography.size.small, lineHeight: typography.lineHeight.body },

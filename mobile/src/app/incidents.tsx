@@ -5,12 +5,12 @@ import { StatusTimeline, useAtlasTheme } from '@/components/atlas-ui';
 import { useAuth } from '@/lib/auth-context';
 import {
   callOperation,
+  fetchIncidentLogs,
+  fetchOperationalIncidents,
+  fetchReportsForReview,
   getAuthorizedBrigades,
-  getBrigadeMember,
   newOperationId,
-  subscribeIncidentEvents,
-  subscribeOperationalIncidents,
-  subscribeReportsForReview,
+  type BrigadeRoster,
   type OperationalDocument,
 } from '@/lib/operations-service';
 import { dimensions, radii, spacing, typography } from '@/theme/tokens';
@@ -35,13 +35,6 @@ const INCIDENT_STAGE: Record<string, string> = {
   closed: 'Cierre',
 };
 
-type BrigadeRoster = {
-  id: string;
-  name: string;
-  availability: string;
-  members: { uid: string; name: string; availability: string }[];
-};
-
 function requestKey(action: string, subject: string) {
   return `${action}:${subject}`;
 }
@@ -49,7 +42,6 @@ function requestKey(action: string, subject: string) {
 export default function IncidentsScreen() {
   const { user, role } = useAuth();
   const { colors } = useAtlasTheme();
-  const [areaIds, setAreaIds] = useState<string[]>([]);
   const [brigadeIds, setBrigadeIds] = useState<string[]>([]);
   const [reports, setReports] = useState<OperationalDocument[]>([]);
   const [incidents, setIncidents] = useState<OperationalDocument[]>([]);
@@ -57,6 +49,10 @@ export default function IncidentsScreen() {
   const [observationNotes, setObservationNotes] = useState<Record<string, string>>({});
   const [brigades, setBrigades] = useState<BrigadeRoster[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reportCursor, setReportCursor] = useState<string | null>(null);
+  const [incidentCursor, setIncidentCursor] = useState<string | null>(null);
+  const [loadingMoreReports, setLoadingMoreReports] = useState(false);
+  const [loadingMoreIncidents, setLoadingMoreIncidents] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [targetUid, setTargetUid] = useState('');
@@ -65,6 +61,24 @@ export default function IncidentsScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const requestIds = useRef(new Map<string, string>());
   const incidentIds = incidents.map((incident) => incident.id).join(',');
+  const refreshData = useCallback(async () => {
+    if (!user || !['firefighter', 'brigade_leader', 'incident_commander'].includes(role)) return;
+    try {
+      const [incidentPage, reportPage] = await Promise.all([
+        fetchOperationalIncidents(),
+        role === 'firefighter' ? Promise.resolve({ items: [] }) : fetchReportsForReview(),
+      ]);
+      setIncidents(incidentPage.items);
+      setReports(reportPage.items);
+      setIncidentCursor(incidentPage.nextCursor);
+      setReportCursor('nextCursor' in reportPage ? reportPage.nextCursor : null);
+      setError(null);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudieron cargar las bandejas operativas.');
+    } finally {
+      setLoading(false);
+    }
+  }, [role, user]);
 
   const idempotencyKey = useCallback((key: string) => {
     let id = requestIds.current.get(key);
@@ -82,9 +96,7 @@ export default function IncidentsScreen() {
     let active = true;
     user.getIdTokenResult().then((token) => {
       if (!active) return;
-      const areas = token.claims.operationalAreaIds;
       const teams = token.claims.brigadeIds;
-      setAreaIds(Array.isArray(areas) ? areas.filter((item): item is string => typeof item === 'string') : []);
       setBrigadeIds(Array.isArray(teams) ? teams.filter((item): item is string => typeof item === 'string') : []);
     }).catch((failure: unknown) => {
       if (active) setError(failure instanceof Error ? failure.message : 'No se pudieron leer los permisos operativos.');
@@ -94,35 +106,70 @@ export default function IncidentsScreen() {
 
   useEffect(() => {
     if (!user || !['firefighter', 'brigade_leader', 'incident_commander'].includes(role)) return;
-    return subscribeOperationalIncidents(
-      user.uid,
-      role,
-      areaIds,
-      (items) => { setIncidents(items); setLoading(false); setError(null); },
-      (failure) => { setLoading(false); setError(failure.message); },
-    );
-  }, [areaIds, role, user]);
+    let active = true;
+    Promise.all([
+      fetchOperationalIncidents(),
+      role === 'firefighter' ? Promise.resolve({ items: [] }) : fetchReportsForReview(),
+    ]).then(([incidentPage, reportPage]) => {
+      if (!active) return;
+      setIncidents(incidentPage.items);
+      setReports(reportPage.items);
+      setIncidentCursor(incidentPage.nextCursor);
+      setReportCursor('nextCursor' in reportPage ? reportPage.nextCursor : null);
+      setError(null);
+    }).catch((failure: unknown) => {
+      if (active) setError(failure instanceof Error ? failure.message : 'No se pudieron cargar las bandejas operativas.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [role, user]);
+
+  const loadMoreReports = async () => {
+    if (!reportCursor || loadingMoreReports) return;
+    setLoadingMoreReports(true);
+    try {
+      const page = await fetchReportsForReview(reportCursor);
+      setReports((current) => [...current, ...page.items]);
+      setReportCursor(page.nextCursor);
+      setError(null);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo cargar la siguiente página de reportes.');
+    } finally {
+      setLoadingMoreReports(false);
+    }
+  };
+
+  const loadMoreIncidents = async () => {
+    if (!incidentCursor || loadingMoreIncidents) return;
+    setLoadingMoreIncidents(true);
+    try {
+      const page = await fetchOperationalIncidents(incidentCursor);
+      setIncidents((current) => [...current, ...page.items]);
+      setIncidentCursor(page.nextCursor);
+      setError(null);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'No se pudo cargar la siguiente página de incidentes.');
+    } finally {
+      setLoadingMoreIncidents(false);
+    }
+  };
 
   useEffect(() => {
-    if (!user || !['brigade_leader', 'incident_commander'].includes(role)) return;
-    return subscribeReportsForReview(
-      areaIds,
-      setReports,
-      (failure) => setError(failure.message),
-    );
-  }, [areaIds, role, user]);
-
-  useEffect(() => {
-    const subscriptions = incidentIds
-      ? incidentIds.split(',').map((incidentId) =>
-        subscribeIncidentEvents(
+    let active = true;
+    const loadLogs = async () => {
+      try {
+        const entries = await Promise.all(incidentIds.split(',').filter(Boolean).map(async (incidentId) => [
           incidentId,
-          (items) => setIncidentEvents((current) => ({ ...current, [incidentId]: items })),
-          (failure) => setError(failure.message),
-        ),
-      )
-      : [];
-    return () => subscriptions.forEach((unsubscribe) => unsubscribe());
+          await fetchIncidentLogs(incidentId),
+        ] as const));
+        if (active) setIncidentEvents(Object.fromEntries(entries));
+      } catch (failure) {
+        if (active) setError(failure instanceof Error ? failure.message : 'No se pudo consultar la bitácora autorizada.');
+      }
+    };
+    void loadLogs();
+    return () => { active = false; };
   }, [incidentIds]);
 
   useEffect(() => {
@@ -130,20 +177,7 @@ export default function IncidentsScreen() {
     if (role !== 'brigade_leader' || brigadeIds.length === 0) {
       return;
     }
-    getAuthorizedBrigades(brigadeIds).then(async (items) => Promise.all(items.map(async (brigade) => {
-      const members = Array.isArray(brigade.memberUids) ? brigade.memberUids.filter((uid): uid is string => typeof uid === 'string') : [];
-      const profiles = await Promise.all(members.map(async (uid) => ({ uid, profile: await getBrigadeMember(uid) })));
-      return {
-        id: brigade.id,
-        name: typeof brigade.name === 'string' ? brigade.name : brigade.id,
-        availability: typeof brigade.availability === 'string' ? brigade.availability : 'unknown',
-        members: profiles.map(({ uid, profile }) => ({
-          uid,
-          name: typeof profile?.displayName === 'string' ? profile.displayName : `Integrante ${uid.slice(0, 6)}`,
-          availability: typeof profile?.availability === 'string' ? profile.availability : 'unknown',
-        })),
-      };
-    })))
+    getAuthorizedBrigades(brigadeIds)
       .then((items) => { if (active) setBrigades(items); })
       .catch((failure: unknown) => { if (active) setError(failure instanceof Error ? failure.message : 'No se pudo consultar la disponibilidad de la brigada.'); });
     return () => { active = false; };
@@ -162,6 +196,7 @@ export default function IncidentsScreen() {
       await callOperation(name, { ...payload, requestId: idempotencyKey(key) });
       requestIds.current.delete(key);
       setMessage(success);
+      void refreshData();
       return true;
     } catch (failure) {
       setError(failure instanceof Error ? `${failure.message} Puedes reintentar la misma acción.` : 'No se pudo completar la acción. Puedes reintentarlo.');
@@ -272,6 +307,14 @@ export default function IncidentsScreen() {
               </View>
             );
           })}
+          {reportCursor ? (
+            <ActionButton
+              label={loadingMoreReports ? 'Cargando…' : 'Cargar más reportes'}
+              secondary
+              disabled={loadingMoreReports}
+              onPress={() => void loadMoreReports()}
+            />
+          ) : null}
         </Panel>
       ) : null}
 
@@ -379,6 +422,14 @@ export default function IncidentsScreen() {
             </View>
           );
         })}
+        {incidentCursor ? (
+          <ActionButton
+            label={loadingMoreIncidents ? 'Cargando…' : 'Cargar más incidentes'}
+            secondary
+            disabled={loadingMoreIncidents}
+            onPress={() => void loadMoreIncidents()}
+          />
+        ) : null}
       </Panel>
     </WorkspacePage>
   );

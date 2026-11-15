@@ -7,9 +7,8 @@ import { useAuth } from '@/lib/auth-context';
 import { dimensions, radii, spacing, typography } from '@/theme/tokens';
 import {
   callOperation,
+  fetchOperationalIncidents,
   getAuthorizedBrigades,
-  getBrigadeMember,
-  subscribeOperationalIncidents,
   type OperationalDocument,
 } from '@/lib/operations-service';
 
@@ -26,7 +25,7 @@ type BrigadeInfo = {
   contact?: string;
   availability?: string;
   capabilities?: string[];
-  memberUids?: string[];
+  members: MemberInfo[];
 };
 
 type MemberInfo = { uid: string; name: string; availability: string };
@@ -35,7 +34,6 @@ export default function BrigadeScreen() {
   const { user, role } = useAuth();
   const { colors } = useAtlasTheme();
   const [brigades, setBrigades] = useState<BrigadeInfo[]>([]);
-  const [members, setMembers] = useState<MemberInfo[]>([]);
   const [assignments, setAssignments] = useState<OperationalDocument[]>([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(true);
   const [availability, setAvailability] = useState('available');
@@ -57,23 +55,15 @@ export default function BrigadeScreen() {
       if (!active) return;
       const mapped = items.map((item) => ({
         id: item.id,
-        name: typeof item.name === 'string' ? item.name : item.id,
+        name: item.name,
         contact: typeof item.contact === 'string' ? item.contact : undefined,
-        availability: typeof item.availability === 'string' ? item.availability : undefined,
+        availability: item.availability,
         capabilities: Array.isArray(item.capabilities) ? item.capabilities.filter((value): value is string => typeof value === 'string') : [],
-        memberUids: Array.isArray(item.memberUids) ? item.memberUids.filter((value): value is string => typeof value === 'string') : [],
+        members: item.members,
       }));
       setBrigades(mapped);
-      const roster = await Promise.all(mapped.flatMap((brigade) => (brigade.memberUids ?? []).map(async (uid) => {
-        const profile = await getBrigadeMember(uid);
-        return {
-          uid,
-          name: typeof profile?.displayName === 'string' ? profile.displayName : `Integrante ${uid.slice(0, 6)}`,
-          availability: typeof profile?.availability === 'string' ? profile.availability : 'unknown',
-        };
-      })));
+      const roster = mapped.flatMap((brigade) => brigade.members);
       if (active) {
-        setMembers(roster);
         const own = roster.find((member) => member.uid === user.uid);
         if (own) setAvailability(own.availability);
       }
@@ -85,19 +75,19 @@ export default function BrigadeScreen() {
 
   useEffect(() => {
     if (!user || role !== 'firefighter') return;
-    return subscribeOperationalIncidents(
-      user.uid,
-      role,
-      [],
-      (items) => {
-        setAssignments(items.filter((item) => item.status !== 'closed'));
+    let active = true;
+    fetchOperationalIncidents().then((page) => {
+      if (active) {
+        setAssignments(page.items.filter((item) => item.status !== 'closed'));
         setAssignmentsLoading(false);
-      },
-      (failure) => {
-        setError(failure.message);
+      }
+    }).catch((failure: unknown) => {
+      if (active) {
+        setError(failure instanceof Error ? failure.message : 'No se pudieron consultar las asignaciones.');
         setAssignmentsLoading(false);
-      },
-    );
+      }
+    });
+    return () => { active = false; };
   }, [role, user]);
 
   const updateAvailability = async (next: string) => {
@@ -105,7 +95,7 @@ export default function BrigadeScreen() {
     setError(null);
     setMessage(null);
     try {
-      await callOperation('setOwnAvailability', { availability: next });
+      await callOperation('setOwnAvailability', { status: next });
       setAvailability(next);
       setMessage('Disponibilidad actualizada.');
     } catch (failure) {
@@ -130,31 +120,31 @@ export default function BrigadeScreen() {
       {role === 'firefighter' ? (
         <>
         <Panel title="Mi disponibilidad">
-          <Text style={[styles.status, { color: colors.ink }]}>Estado actual: {availability === 'available' ? 'Disponible' : availability === 'occupied' ? 'Ocupado' : availability === 'out_of_service' ? 'Fuera de servicio' : 'Sin configurar'}</Text>
+          <Text style={[styles.status, { color: colors.ink }]}>Estado actual: {availability === 'available' ? 'Disponible' : availability === 'busy' ? 'Ocupado' : availability === 'off_duty' ? 'Fuera de servicio' : 'Sin configurar'}</Text>
           <View style={styles.actions}>
             {[
               ['available', 'Disponible'],
-              ['out_of_service', 'Fuera de servicio'],
+              ['off_duty', 'Fuera de servicio'],
             ].map(([value, label]) => (
               <Pressable
                 key={value}
                 accessibilityRole="button"
                 accessibilityLabel={`Establecer disponibilidad: ${label}`}
-                accessibilityState={{ selected: availability === value, disabled: busy || availability === 'occupied' }}
-                disabled={busy || availability === 'occupied'}
+                accessibilityState={{ selected: availability === value, disabled: busy || availability === 'busy' }}
+                disabled={busy || availability === 'busy'}
                 onPress={() => void updateAvailability(value)}
                 style={({ pressed }) => [
                   styles.chip,
                   { borderColor: availability === value ? colors.calm : colors.line, backgroundColor: availability === value ? colors.calmSoft : colors.surface },
-                  (pressed || busy || availability === 'occupied') && styles.disabled,
+                  (pressed || busy || availability === 'busy') && styles.disabled,
                 ]}
               >
                 <Text style={[styles.chipText, { color: availability === value ? colors.calm : colors.inkMuted }]}>{label}</Text>
               </Pressable>
             ))}
           </View>
-          {availability === 'occupied' ? <MutedText>La disponibilidad cambia automáticamente al cerrar una asignación activa.</MutedText> : null}
-          {availability !== 'occupied' ? <ActionButton label={busy ? 'Guardando…' : 'Guardar disponibilidad'} onPress={() => void updateAvailability(availability)} disabled={busy} /> : null}
+          {availability === 'busy' ? <MutedText>La disponibilidad cambia automáticamente al cerrar una asignación activa.</MutedText> : null}
+          {availability !== 'busy' ? <ActionButton label={busy ? 'Guardando…' : 'Guardar disponibilidad'} onPress={() => void updateAvailability(availability)} disabled={busy} /> : null}
         </Panel>
         <Panel title="Mis asignaciones activas">
           {assignmentsLoading ? <MutedText>Cargando asignaciones autorizadas…</MutedText> : null}
@@ -189,11 +179,11 @@ export default function BrigadeScreen() {
             {brigade.availability ? <MutedText>Brigada: {brigade.availability === 'available' ? 'disponible' : brigade.availability === 'occupied' ? 'ocupada' : brigade.availability}</MutedText> : null}
             {brigade.contact ? <MutedText>Contacto institucional: {brigade.contact}</MutedText> : null}
             {brigade.capabilities?.length ? <MutedText>Capacidades: {brigade.capabilities.join(', ')}</MutedText> : null}
-            {brigade.memberUids?.map((uid) => {
-              const member = members.find((item) => item.uid === uid);
+            {brigade.members.map((member) => {
+            const uid = member.uid;
               return (
                 <Text key={uid} style={[styles.member, { color: colors.inkMuted }]}>
-                  {member?.name ?? `Integrante ${uid.slice(0, 6)}`} · {member?.availability === 'available' ? 'disponible' : member?.availability === 'occupied' ? 'ocupado' : member?.availability === 'out_of_service' ? 'fuera de servicio' : 'estado pendiente'}
+                {member.name} · {member.availability === 'available' ? 'disponible' : member.availability === 'busy' ? 'ocupado' : member.availability === 'off_duty' ? 'fuera de servicio' : 'estado pendiente'}
                 </Text>
               );
             })}

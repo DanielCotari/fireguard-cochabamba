@@ -7,7 +7,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "bootstrap:admin": "node scripts/bootstrap-first-admin.mjs",
+    "cleanup:orphan-photos": "node scripts/cleanup-orphan-report-photos.mjs",
     "lint": "tsc --noEmit -p tsconfig.json",
+    "import:satellite": "node scripts/import-satellite-results.mjs",
+    "migrate:legacy": "node scripts/migrate-legacy-data.mjs",
     "test:rules": "firebase emulators:exec --config ../../firebase.json --project demo-fireguard --only firestore,storage \"node --test test/access-rules.test.mjs\"",
     "test:operations": "firebase emulators:exec --config ../../firebase.json --project demo-fireguard --only auth,firestore,functions,storage \"node --test test/operations-flow.test.mjs\""
   },

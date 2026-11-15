@@ -21,22 +21,24 @@ export function Button({
   accessibilityLabel?: string;
 }) {
   const { colors } = useAtlasTheme();
+  const onAccent = useColorScheme() === 'dark' ? '#1A120C' : '#FFFFFF';
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: variant === 'primary' ? colors.ink : variant === 'secondary' ? colors.surface : 'transparent' },
-        { borderColor: variant === 'primary' ? colors.ink : colors.lineStrong },
+        { backgroundColor: variant === 'primary' ? colors.accent : variant === 'secondary' ? colors.surface : 'transparent' },
+        { borderColor: variant === 'primary' ? colors.accent : colors.lineStrong },
         variant !== 'primary' && styles.buttonBorder,
         disabled && styles.disabled,
         pressed && !disabled && styles.pressed,
       ]}
     >
-      <Text style={[styles.buttonText, { color: variant === 'primary' ? colors.surface : colors.ink }]}>{label}</Text>
+      <Text style={[styles.buttonText, { color: variant === 'primary' ? onAccent : colors.ink }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -135,15 +137,19 @@ export function MonthScrubber({
 export function StatusTimeline({ current }: { current: string }) {
   const { colors } = useAtlasTheme();
   const stages = ['Reporte', 'Evaluación', 'Asignación', 'Desplazamiento', 'Intervención', 'Vigilancia', 'Cierre'];
+  const currentIndex = stages.indexOf(current);
   return (
     <View accessibilityRole="list" accessibilityLabel="Etapas del seguimiento" style={styles.timeline}>
       {stages.map((stage, index) => {
         const selected = stage === current;
+        const reached = currentIndex >= 0 && index < currentIndex;
         return (
           <View key={stage} accessibilityRole="listitem" style={styles.timelineItem}>
-            <View style={[styles.timelineDot, { backgroundColor: selected ? colors.attention : colors.surface, borderColor: selected ? colors.attention : colors.lineStrong }]} />
-            <Text style={[styles.timelineText, { color: selected ? colors.ink : colors.inkMuted }]}>{stage}</Text>
-            {index === 2 ? <Text style={[styles.timelineClarifier, { color: colors.inkSubtle }]}>Asignado ≠ en desplazamiento</Text> : null}
+            <View style={[styles.timelineDot, { backgroundColor: selected || reached ? colors.accent : colors.surface, borderColor: selected || reached ? colors.accent : colors.lineStrong }]} />
+            <Text style={[styles.timelineText, { color: selected ? colors.ink : colors.inkMuted, fontWeight: selected ? '700' : '400' }]}>
+              {stage}{selected ? ' · etapa actual' : reached ? ' · registrada' : ''}
+            </Text>
+            {index === 2 ? <Text style={[styles.timelineClarifier, { color: colors.inkSubtle }]}>Asignado no significa en desplazamiento</Text> : null}
           </View>
         );
       })}
@@ -157,10 +163,10 @@ export function EmptyState({
   children,
 }: PropsWithChildren<{ variant: 'pending' | 'noData' | 'noPermissions' | 'noFirebase'; title: string }>) {
   const { colors } = useAtlasTheme();
-  const icon = variant === 'pending' ? '···' : variant === 'noPermissions' ? '—' : variant === 'noFirebase' ? '!' : '○';
+  const icon = variant === 'pending' ? 'Pendiente' : variant === 'noPermissions' ? 'Sin permiso' : variant === 'noFirebase' ? 'Sin conexión' : 'Sin resultados';
   return (
     <View accessibilityRole="text" style={[styles.emptyState, { borderColor: colors.line, backgroundColor: colors.canvas }]}>
-      <Text style={[styles.emptyIcon, { color: variant === 'pending' ? colors.attention : colors.calm }]}>{icon}</Text>
+      <Text style={[styles.emptyIcon, { color: variant === 'noFirebase' || variant === 'noPermissions' ? colors.danger : variant === 'pending' ? colors.warning : colors.inkMuted }]}>{icon}</Text>
       <Text style={[styles.emptyTitle, { color: colors.ink }]}>{title}</Text>
       <Text style={[styles.emptyBody, { color: colors.inkMuted }]}>{children}</Text>
     </View>
@@ -191,9 +197,9 @@ export function FormField({
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.inkSubtle}
-        style={[styles.input, { backgroundColor: colors.surfaceRaised, borderColor: error ? colors.attention : colors.lineStrong, color: colors.ink }]}
+        style={[styles.input, { backgroundColor: colors.surfaceRaised, borderColor: error ? colors.danger : colors.lineStrong, color: colors.ink }]}
       />
-      {error ? <Text accessibilityRole="alert" style={[styles.fieldError, { color: colors.attention }]}>{error}</Text> : null}
+      {error ? <Text accessibilityRole="alert" style={[styles.fieldError, { color: colors.danger }]}>{error}</Text> : null}
     </View>
   );
 }
@@ -201,8 +207,8 @@ export function FormField({
 export function ReadingNote() {
   const { colors } = useAtlasTheme();
   return (
-    <View accessibilityRole="text" accessibilityLabel="Nota de interpretación: una detección no confirma un incendio y su ausencia no lo descarta" style={[styles.readingNote, { backgroundColor: colors.attentionSoft, borderColor: colors.attention }]}>
-      <Text style={[styles.readingMark, { color: colors.attention }]}>LECTURA DE CAMPO</Text>
+    <View accessibilityRole="text" accessibilityLabel="Nota de interpretación: una detección no confirma un incendio y su ausencia no lo descarta" style={[styles.readingNote, { backgroundColor: colors.warningSoft, borderColor: colors.warning }]}>
+      <Text style={[styles.readingMark, { color: colors.warning }]}>LECTURA</Text>
       <Text style={[styles.readingText, { color: colors.ink }]}>Una detección no confirma un incendio. Su ausencia tampoco lo descarta.</Text>
     </View>
   );
@@ -232,18 +238,18 @@ const styles = StyleSheet.create({
   legendMeta: { fontFamily: typography.family.sans, fontSize: typography.size.caption },
   scrubber: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   scrubberArrow: { width: dimensions.touchTarget, height: dimensions.touchTarget, alignItems: 'center', justifyContent: 'center', borderWidth: dimensions.hairline, borderRadius: radii.small },
-  scrubberArrowText: { fontFamily: typography.family.editorial, fontSize: typography.size.heading },
+  scrubberArrowText: { fontFamily: typography.family.sans, fontSize: typography.size.heading, fontWeight: '600' },
   scrubberMonth: { flex: 1, alignItems: 'center' },
-  scrubberName: { fontFamily: typography.family.editorial, fontSize: typography.size.subheading, textTransform: 'capitalize' },
-  scrubberYear: { fontFamily: typography.family.mono, fontSize: typography.size.caption },
+  scrubberName: { fontFamily: typography.family.sans, fontSize: typography.size.subheading, fontWeight: '700', textTransform: 'capitalize' },
+  scrubberYear: { fontFamily: typography.family.mono, fontSize: typography.size.caption, fontVariant: typography.tabular },
   timeline: { gap: spacing.md },
   timelineItem: { minHeight: dimensions.touchTarget, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   timelineDot: { width: spacing.sm, height: spacing.sm, borderWidth: dimensions.rule, borderRadius: radii.pill },
   timelineText: { fontFamily: typography.family.sans, fontSize: typography.size.small },
   timelineClarifier: { flexBasis: '100%', marginLeft: spacing.xl, fontFamily: typography.family.mono, fontSize: typography.size.caption },
   emptyState: { alignItems: 'center', justifyContent: 'center', padding: spacing.xl, borderWidth: dimensions.hairline, borderRadius: radii.medium, gap: spacing.sm, overflow: 'hidden' },
-  emptyIcon: { fontFamily: typography.family.editorial, fontSize: typography.size.display },
-  emptyTitle: { fontFamily: typography.family.editorial, fontSize: typography.size.subheading, textAlign: 'center' },
+  emptyIcon: { fontFamily: typography.family.sans, fontSize: typography.size.caption, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' },
+  emptyTitle: { fontFamily: typography.family.sans, fontSize: typography.size.subheading, fontWeight: '700', textAlign: 'center' },
   emptyBody: { fontFamily: typography.family.sans, fontSize: typography.size.small, lineHeight: typography.lineHeight.body, textAlign: 'center', maxWidth: dimensions.emptyStateWidth },
   field: { gap: spacing.xs },
   fieldLabel: { fontFamily: typography.family.sans, fontSize: typography.size.small, fontWeight: '700' },
@@ -251,5 +257,5 @@ const styles = StyleSheet.create({
   fieldError: { fontFamily: typography.family.sans, fontSize: typography.size.caption },
   readingNote: { padding: spacing.md, borderLeftWidth: spacing.xxs, borderRadius: radii.small, gap: spacing.xs },
   readingMark: { fontFamily: typography.family.mono, fontSize: typography.size.caption, fontWeight: '800', letterSpacing: 1 },
-  readingText: { fontFamily: typography.family.editorial, fontSize: typography.size.body, lineHeight: typography.lineHeight.body },
+  readingText: { fontFamily: typography.family.sans, fontSize: typography.size.small, lineHeight: typography.lineHeight.body },
 });

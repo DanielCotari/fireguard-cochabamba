@@ -5,104 +5,140 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function role() {
-      return signedIn() && request.auth.token.role is string
-        ? request.auth.token.role
-        : 'citizen';
+    function activeAccount(uid) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/access/$(uid))
+        && get(/databases/$(database)/documents/access/$(uid)).data.active == true;
     }
 
-    function isOperationalReviewer() {
-      return signedIn() && role() in ['brigade_leader', 'incident_commander'];
+    function hasIncidentAccess(incidentId, uid) {
+      return activeAccount(uid)
+        && exists(/databases/$(database)/documents/incidents/$(incidentId)/access/$(uid))
+        && get(/databases/$(database)/documents/incidents/$(incidentId)/access/$(uid)).data.active == true;
     }
 
-    function hasOperationalArea(areaId) {
-      return signedIn() &&
-        request.auth.token.operationalAreaIds is list &&
-        request.auth.token.operationalAreaIds.hasAny([areaId]);
+    function hasActiveBrigadeMembership(brigadeId, uid) {
+      return activeAccount(uid)
+        && get(/databases/$(database)/documents/access/$(uid)).data.role in ['firefighter', 'brigade_leader']
+        && exists(/databases/$(database)/documents/brigades/$(brigadeId)/members/$(uid))
+        && get(/databases/$(database)/documents/brigades/$(brigadeId)/members/$(uid)).data.active == true;
     }
 
-    function canReviewReport(data) {
-      return isOperationalReviewer() && hasOperationalArea(data.operationalAreaId);
-    }
-
-    function isTechnicalAdmin() {
-      return signedIn() && request.auth.token.technicalAdmin == true;
-    }
-
-    function canReadIncident(data) {
-      return signedIn() && (
-        data.citizenUids.hasAny([request.auth.uid]) ||
-        data.assignedUids.hasAny([request.auth.uid]) ||
-        (role() in ['brigade_leader', 'incident_commander'] &&
-          hasOperationalArea(data.operationalAreaId))
-      );
+    match /access/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
     }
 
     match /users/{uid} {
-      allow read: if signedIn() && (
-        request.auth.uid == uid ||
-        (role() == 'brigade_leader' &&
-          request.auth.token.brigadeIds is list &&
-          resource.data.brigadeIds is list &&
-          request.auth.token.brigadeIds.hasAny(resource.data.brigadeIds))
-      );
+      allow get: if signedIn() && request.auth.uid == uid && activeAccount(uid);
+      allow list, update, delete: if false;
       allow create: if signedIn()
         && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['displayName', 'email', 'phone', 'createdAt'])
+        && activeAccount(uid)
+        && request.resource.data.keys().hasAll(['displayName', 'phone', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['displayName', 'phone', 'createdAt', 'updatedAt'])
         && request.resource.data.displayName is string
         && request.resource.data.displayName.size() >= 1
         && request.resource.data.displayName.size() <= 120
-        && request.resource.data.email == request.auth.token.email
         && (request.resource.data.phone == null || request.resource.data.phone is string)
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    match /availability/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid && activeAccount(uid);
+      allow list, create, update, delete: if false;
     }
 
     match /reports/{reportId} {
-      allow get, list: if signedIn() && (
-        resource.data.ownerUid == request.auth.uid ||
-        canReviewReport(resource.data)
-      );
+      allow get, list: if signedIn()
+        && activeAccount(request.auth.uid)
+        && resource.data.authorId == request.auth.uid;
       allow create, update, delete: if false;
 
       match /updates/{updateId} {
-        allow read: if signedIn() && (
-          get(/databases/$(database)/documents/reports/$(reportId)).data.ownerUid == request.auth.uid ||
-          canReviewReport(get(/databases/$(database)/documents/reports/$(reportId)).data)
-        );
-        allow write: if false;
+        allow get, list: if signedIn()
+          && activeAccount(request.auth.uid)
+          && get(/databases/$(database)/documents/reports/$(reportId)).data.authorId == request.auth.uid;
+        allow create, update, delete: if false;
+      }
+
+      match /reviews/{reviewId} {
+        allow read, write: if false;
       }
     }
 
-    match /incidents/{incidentId} {
-      allow get, list: if canReadIncident(resource.data);
-      allow create, update, delete: if false;
+    match /reportReviews/{reportId} {
+      allow read, write: if false;
+    }
 
-      match /events/{eventId} {
-        allow read: if canReadIncident(
-          get(/databases/$(database)/documents/incidents/$(incidentId)).data
-        );
-        allow write: if false;
+    match /incidents/{incidentId} {
+      allow get: if signedIn() && hasIncidentAccess(incidentId, request.auth.uid);
+      allow list, create, update, delete: if false;
+
+      match /access/{uid} {
+        allow read, write: if false;
+      }
+
+      match /assignments/{assignmentId} {
+        allow read, write: if false;
+      }
+
+      match /logs/{logId} {
+        allow get, list: if signedIn() && hasIncidentAccess(incidentId, request.auth.uid);
+        allow create, update, delete: if false;
+      }
+
+      match /commandTransfers/{transferId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /brigades/{brigadeId} {
+      allow get: if signedIn()
+        && (hasActiveBrigadeMembership(brigadeId, request.auth.uid)
+          || (activeAccount(request.auth.uid) && request.auth.token.technicalAdmin == true));
+      allow list, create, update, delete: if false;
+
+      match /members/{uid} {
+        allow read, write: if false;
       }
     }
 
     match /organizations/{organizationId} {
-      allow read: if isTechnicalAdmin() ||
-        (signedIn() && role() in ['brigade_leader', 'firefighter', 'incident_commander'] &&
-          hasOperationalArea(resource.data.operationalAreaId));
-      allow write: if false;
+      allow get: if signedIn()
+        && activeAccount(request.auth.uid)
+        && (
+          (
+            get(/databases/$(database)/documents/access/$(request.auth.uid)).data.role in ['firefighter', 'brigade_leader', 'incident_commander']
+            && get(/databases/$(database)/documents/access/$(request.auth.uid)).data.organizationId == organizationId
+          )
+          || request.auth.token.technicalAdmin == true
+        );
+      allow list, create, update, delete: if false;
     }
 
-    match /brigades/{brigadeId} {
-      allow read: if isTechnicalAdmin() ||
-        (signedIn() && request.auth.token.brigadeIds is list &&
-          request.auth.token.brigadeIds.hasAny([brigadeId])) ||
-        (signedIn() && role() == 'incident_commander' &&
-          hasOperationalArea(resource.data.operationalAreaId));
-      allow write: if false;
+    match /publicDetections/{detectionId} {
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
-    match /operatorInvitations/{invitationId} {
+    match /publicMonthlyStats/{monthId} {
+      allow get, list: if true;
+      allow create, update, delete: if false;
+    }
+
+    match /publicCoverage/{coverageId} {
+      allow get, list: if true;
+      allow create, update, delete: if false;
+    }
+
+    match /publicConfig/{documentId} {
+      allow get, list: if true;
+      allow create, update, delete: if false;
+    }
+
+    match /{document=**} {
       allow read, write: if false;
     }
   }

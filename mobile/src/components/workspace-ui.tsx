@@ -1,7 +1,7 @@
 import type { PropsWithChildren, ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useColorScheme, useWindowDimensions } from 'react-native';
 import { useAtlasTheme } from '@/components/atlas-ui';
-import { dimensions, radii, spacing, typography } from '@/theme/tokens';
+import { breakpoints, dimensions, radii, spacing, typography } from '@/theme/tokens';
 
 export function WorkspacePage({
   title,
@@ -9,8 +9,10 @@ export function WorkspacePage({
   children,
 }: PropsWithChildren<{ title: string; description?: string }>) {
   const { colors } = useAtlasTheme();
+  const { width } = useWindowDimensions();
+  const compact = width < breakpoints.compact;
   return (
-    <ScrollView style={[styles.page, { backgroundColor: colors.canvas }]} contentContainerStyle={styles.content}>
+    <ScrollView style={[styles.page, { backgroundColor: colors.canvas }]} contentContainerStyle={[styles.content, compact && styles.contentCompact]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.ink }]}>{title}</Text>
         {description ? <Text style={[styles.description, { color: colors.inkMuted }]}>{description}</Text> : null}
@@ -43,6 +45,7 @@ export function Field({
   secureTextEntry,
   autoCapitalize,
   disabled = false,
+  error,
 }: {
   label: string;
   value: string;
@@ -53,6 +56,7 @@ export function Field({
   secureTextEntry?: boolean;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   disabled?: boolean;
+  error?: string;
 }) {
   const { colors } = useAtlasTheme();
   return (
@@ -60,6 +64,7 @@ export function Field({
       <Text style={[styles.label, { color: colors.ink }]}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
+        accessibilityHint={error}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -71,11 +76,12 @@ export function Field({
         editable={!disabled}
         style={[
           styles.input,
-          { borderColor: colors.lineStrong, color: colors.ink, backgroundColor: colors.surfaceRaised },
+          { borderColor: error ? colors.danger : colors.lineStrong, color: colors.ink, backgroundColor: colors.surfaceRaised },
           multiline && styles.multiline,
           disabled && styles.disabledInput,
         ]}
       />
+      {error ? <Text accessibilityRole="alert" style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
     </View>
   );
 }
@@ -92,21 +98,23 @@ export function ActionButton({
   secondary?: boolean;
 }) {
   const { colors } = useAtlasTheme();
+  const onAccent = useColorScheme() === 'dark' ? '#1A120C' : '#FFFFFF';
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: secondary ? colors.surface : colors.ink, borderColor: secondary ? colors.lineStrong : colors.ink },
+        { backgroundColor: secondary ? colors.surface : colors.accent, borderColor: secondary ? colors.lineStrong : colors.accent },
         secondary && styles.secondaryButton,
         disabled && styles.disabledButton,
         pressed && !disabled && styles.pressed,
       ]}
     >
-      <Text style={[styles.buttonText, { color: secondary ? colors.ink : colors.surface }]}>{label}</Text>
+      <Text style={[styles.buttonText, { color: secondary ? colors.ink : onAccent }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -114,8 +122,8 @@ export function ActionButton({
 export function Notice({ children, error = false }: PropsWithChildren<{ error?: boolean }>) {
   const { colors } = useAtlasTheme();
   return (
-    <View accessibilityRole="alert" style={[styles.notice, { backgroundColor: error ? colors.attentionSoft : colors.calmSoft, borderColor: error ? colors.attention : colors.calm }]}>
-      <Text style={[styles.noticeText, { color: error ? colors.attention : colors.calm }]}>{children}</Text>
+    <View accessibilityRole="alert" style={[styles.notice, { backgroundColor: error ? colors.dangerSoft : colors.calmSoft, borderColor: error ? colors.danger : colors.calm }]}>
+      <Text style={[styles.noticeText, { color: error ? colors.danger : colors.calm }]}>{children}</Text>
     </View>
   );
 }
@@ -128,17 +136,19 @@ export function MutedText({ children }: PropsWithChildren) {
 const styles = StyleSheet.create({
   page: { flex: 1 },
   content: { width: '100%', maxWidth: dimensions.workspaceContent, alignSelf: 'center', padding: spacing.lg, paddingBottom: spacing.section, gap: spacing.md },
+  contentCompact: { paddingHorizontal: spacing.md },
   header: { gap: spacing.xxs, marginBottom: spacing.xxs },
-  title: { fontFamily: typography.family.editorial, fontSize: typography.size.heading, fontWeight: '400' },
+  title: { fontFamily: typography.family.sans, fontSize: typography.size.heading, fontWeight: '700' },
   description: { fontFamily: typography.family.sans, fontSize: typography.size.small, lineHeight: typography.lineHeight.body, maxWidth: dimensions.workspaceDescription },
   panel: { padding: spacing.md, borderRadius: radii.medium, borderWidth: dimensions.hairline, gap: spacing.md },
   panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
-  panelTitle: { fontFamily: typography.family.editorial, fontSize: typography.size.subheading, flexShrink: 1 },
+  panelTitle: { fontFamily: typography.family.sans, fontSize: typography.size.body, fontWeight: '700', flexShrink: 1 },
   field: { gap: spacing.xs },
   label: { fontFamily: typography.family.sans, fontSize: typography.size.small, fontWeight: '700' },
   input: { minHeight: dimensions.touchTarget, borderWidth: dimensions.hairline, borderRadius: radii.small, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, fontFamily: typography.family.sans, fontSize: typography.size.body },
   disabledInput: { opacity: 0.6 },
   multiline: { minHeight: dimensions.multilineFieldHeight, textAlignVertical: 'top' },
+  error: { fontFamily: typography.family.sans, fontSize: typography.size.caption, lineHeight: typography.lineHeight.body },
   button: { minHeight: dimensions.touchTarget, borderRadius: radii.small, borderWidth: dimensions.hairline, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-start' },
   secondaryButton: { borderWidth: dimensions.hairline },
   disabledButton: { opacity: 0.5 },

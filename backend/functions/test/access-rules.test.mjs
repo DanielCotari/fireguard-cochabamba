@@ -9,10 +9,13 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   serverTimestamp,
   setDoc,
+  updateDoc,
+  where,
 } from 'firebase/firestore';
-import { ref, uploadBytes } from 'firebase/storage';
+import { getBytes, ref, uploadBytes } from 'firebase/storage';
 import { after, before, beforeEach, test } from 'node:test';
 
 let environment;
@@ -36,120 +39,167 @@ beforeEach(async () => {
   await environment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore();
     await Promise.all([
+      setDoc(doc(firestore, 'access', 'citizen-1'), { active: true, role: 'citizen' }),
+      setDoc(doc(firestore, 'access', 'citizen-2'), { active: true, role: 'citizen' }),
+      setDoc(doc(firestore, 'access', 'new-citizen'), { active: true, role: 'citizen' }),
+      setDoc(doc(firestore, 'access', 'inactive-citizen'), { active: false, role: 'citizen' }),
+      setDoc(doc(firestore, 'access', 'firefighter-1'), { active: true, role: 'firefighter' }),
+      setDoc(doc(firestore, 'access', 'reviewer-1'), { active: true, role: 'brigade_leader' }),
+      setDoc(doc(firestore, 'users', 'citizen-1'), {
+        displayName: 'Ciudadano',
+        phone: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
       setDoc(doc(firestore, 'reports', 'report-citizen-1'), {
-        ownerUid: 'citizen-1',
-        operationalAreaId: 'zone-1',
+        authorId: 'citizen-1',
+        description: 'Humo visible cerca del camino.',
         status: 'received',
       }),
       setDoc(doc(firestore, 'reports', 'report-citizen-2'), {
-        ownerUid: 'citizen-2',
-        operationalAreaId: 'zone-2',
+        authorId: 'citizen-2',
+        description: 'Humo visible en otra zona.',
         status: 'received',
       }),
-      setDoc(doc(firestore, 'incidents', 'incident-citizen-1'), {
-        citizenUids: ['citizen-1'],
-        assignedUids: ['firefighter-1'],
-        operationalAreaId: 'zone-1',
-        status: 'assigned',
-      }),
-      setDoc(doc(firestore, 'incidents', 'incident-private'), {
-        citizenUids: [],
-        assignedUids: [],
-        operationalAreaId: 'zone-2',
-        status: 'assigned',
-      }),
-      setDoc(doc(firestore, 'incidents', 'incident-citizen-1', 'events', 'event-1'), {
+      setDoc(doc(firestore, 'incidents', 'incident-private'), { status: 'assigned' }),
+      setDoc(doc(firestore, 'incidents', 'incident-private', 'access', 'citizen-1'), { active: true }),
+      setDoc(doc(firestore, 'incidents', 'incident-private', 'logs', 'log-1'), {
         message: 'Intervención iniciada.',
       }),
+      setDoc(doc(firestore, 'publicDetections', 'detection-1'), { monthId: '2026-01' }),
     ]);
   });
 });
 
-test('citizens can read their own reports but not another citizen report', async () => {
-  const firestore = environment.authenticatedContext('citizen-1', {
-    role: 'citizen',
-    email: 'citizen@example.test',
-  }).firestore();
+test('visitors can read public satellite data but not private user data', async () => {
+  const visitor = environment.unauthenticatedContext().firestore();
+  await assertSucceeds(getDoc(doc(visitor, 'publicDetections', 'detection-1')));
+  await assertFails(getDoc(doc(visitor, 'reports', 'report-citizen-1')));
+  await assertFails(getDoc(doc(visitor, 'users', 'citizen-1')));
+});
+
+test('citizens can read only their own profile and reports using authorId filters', async () => {
+  const firestore = environment.authenticatedContext('citizen-1').firestore();
+  await assertSucceeds(getDoc(doc(firestore, 'users', 'citizen-1')));
+  await assertFails(getDoc(doc(firestore, 'users', 'citizen-2')));
   await assertSucceeds(getDoc(doc(firestore, 'reports', 'report-citizen-1')));
   await assertFails(getDoc(doc(firestore, 'reports', 'report-citizen-2')));
+  await assertSucceeds(getDocs(query(
+    collection(firestore, 'reports'),
+    where('authorId', '==', 'citizen-1'),
+  )));
+  await assertFails(getDocs(collection(firestore, 'reports')));
 });
 
-test('clients cannot create reports directly or grant themselves operational claims', async () => {
-  const firestore = environment.authenticatedContext('citizen-1', {
-    role: 'citizen',
-    email: 'citizen@example.test',
-  }).firestore();
+test('clients cannot write access documents or change report state', async () => {
+  const firestore = environment.authenticatedContext('citizen-1').firestore();
+  await assertFails(setDoc(doc(firestore, 'access', 'citizen-1'), { active: true, role: 'super_admin' }));
   await assertFails(setDoc(doc(firestore, 'reports', 'forged-report-123'), {
-    ownerUid: 'citizen-1',
-    operationalAreaId: 'zone-1',
+    authorId: 'citizen-1',
+    status: 'received',
   }));
   await assertFails(setDoc(doc(firestore, 'users', 'citizen-1'), {
-    displayName: 'Ciudadano',
-    email: 'citizen@example.test',
+    displayName: 'Elevated',
     phone: null,
-    role: 'incident_commander',
+    email: 'citizen@example.test',
     createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(setDoc(doc(firestore, 'reports', 'report-citizen-1'), {
+    authorId: 'citizen-1',
+    status: 'closed',
   }));
 });
 
-test('operational reviewers only read reports in their authorized area', async () => {
+test('active users can create only the exact profile schema with server timestamps', async () => {
+  const firestore = environment.authenticatedContext('new-citizen').firestore();
+  await assertSucceeds(setDoc(doc(firestore, 'users', 'new-citizen'), {
+    displayName: 'Nueva persona',
+    phone: null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(setDoc(doc(firestore, 'users', 'new-citizen'), {
+    displayName: 'Perfil no válido',
+    phone: null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    role: 'super_admin',
+  }));
+});
+
+test('inactive accounts cannot read private documents', async () => {
+  const firestore = environment.authenticatedContext('inactive-citizen').firestore();
+  await assertFails(getDoc(doc(firestore, 'users', 'inactive-citizen')));
+  await assertFails(getDoc(doc(firestore, 'reports', 'report-citizen-1')));
+});
+
+test('operational report and incident lists are not directly readable by clients', async () => {
   const reviewer = environment.authenticatedContext('reviewer-1', {
     role: 'brigade_leader',
     operationalAreaIds: ['zone-1'],
   }).firestore();
-  await assertSucceeds(getDoc(doc(reviewer, 'reports', 'report-citizen-1')));
-  await assertFails(getDoc(doc(reviewer, 'reports', 'report-citizen-2')));
-});
-
-test('incident access is limited to linked citizens, assigned personnel, and the authorized area', async () => {
-  const citizen = environment.authenticatedContext('citizen-1', { role: 'citizen' }).firestore();
-  const firefighter = environment.authenticatedContext('firefighter-1', { role: 'firefighter' }).firestore();
-  const reviewer = environment.authenticatedContext('reviewer-1', {
-    role: 'incident_commander',
-    operationalAreaIds: ['zone-1'],
-  }).firestore();
-  const unrelated = environment.authenticatedContext('other-user', { role: 'citizen' }).firestore();
-  const technicalAdmin = environment.authenticatedContext('admin-1', {
-    role: 'super_admin',
-    technicalAdmin: true,
-  }).firestore();
-
-  await assertSucceeds(getDoc(doc(citizen, 'incidents', 'incident-citizen-1')));
-  await assertSucceeds(getDoc(doc(citizen, 'incidents', 'incident-citizen-1', 'events', 'event-1')));
-  await assertSucceeds(getDoc(doc(firefighter, 'incidents', 'incident-citizen-1')));
-  await assertSucceeds(getDoc(doc(reviewer, 'incidents', 'incident-citizen-1')));
-  await assertFails(getDoc(doc(unrelated, 'incidents', 'incident-citizen-1')));
+  await assertFails(getDoc(doc(reviewer, 'reports', 'report-citizen-1')));
+  await assertFails(getDocs(collection(reviewer, 'reports')));
   await assertFails(getDoc(doc(reviewer, 'incidents', 'incident-private')));
-  await assertFails(getDoc(doc(technicalAdmin, 'incidents', 'incident-private')));
-  await assertFails(getDocs(collection(citizen, 'incidents')));
+  await assertFails(getDocs(collection(reviewer, 'incidents')));
 });
 
-test('report photographs accept only the owner and bounded image uploads', async () => {
+test('incident documents and logs require an active per-incident access record', async () => {
+  const authorized = environment.authenticatedContext('citizen-1').firestore();
+  const unrelated = environment.authenticatedContext('citizen-2').firestore();
+  await assertSucceeds(getDoc(doc(authorized, 'incidents', 'incident-private')));
+  await assertSucceeds(getDoc(doc(authorized, 'incidents', 'incident-private', 'logs', 'log-1')));
+  await assertFails(getDoc(doc(unrelated, 'incidents', 'incident-private')));
+  await assertFails(getDoc(doc(unrelated, 'incidents', 'incident-private', 'logs', 'log-1')));
+});
+
+test('revoking incident access immediately blocks incident and log reads', async () => {
+  const firestore = environment.authenticatedContext('citizen-1').firestore();
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), 'incidents', 'incident-private', 'access', 'citizen-1'), {
+      active: false,
+    });
+  });
+  await assertFails(getDoc(doc(firestore, 'incidents', 'incident-private')));
+  await assertFails(getDoc(doc(firestore, 'incidents', 'incident-private', 'logs', 'log-1')));
+});
+
+test('report photos are private, owner-scoped, bounded, and immutable', async () => {
   const ownerStorage = environment.authenticatedContext('citizen-1').storage();
   const image = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
-  await assertSucceeds(uploadBytes(
-    ref(ownerStorage, 'report-images/citizen-1/report-citizen-1'),
-    image,
-    {
-      contentType: 'image/jpeg',
-      customMetadata: {
-        ownerUid: 'citizen-1',
-        reportId: 'report-citizen-1',
-        operationalAreaId: 'cochabamba-pilot',
-      },
-    },
-  ));
+  const ownerPhoto = ref(ownerStorage, 'reportPhotos/citizen-1/report-citizen-1/original');
+  await assertSucceeds(uploadBytes(ownerPhoto, image, {
+    contentType: 'image/jpeg',
+    customMetadata: { authorId: 'citizen-1', reportId: 'report-citizen-1' },
+  }));
+  await assertSucceeds(getBytes(ownerPhoto));
+
   const otherStorage = environment.authenticatedContext('citizen-2').storage();
+  await assertFails(getBytes(ref(otherStorage, 'reportPhotos/citizen-1/report-citizen-1/original')));
   await assertFails(uploadBytes(
-    ref(otherStorage, 'report-images/citizen-1/report-citizen-1'),
+    ref(otherStorage, 'reportPhotos/citizen-1/report-citizen-1/original'),
     image,
-    {
-      contentType: 'image/jpeg',
-      customMetadata: {
-        ownerUid: 'citizen-1',
-        reportId: 'report-citizen-1',
-        operationalAreaId: 'cochabamba-pilot',
-      },
-    },
+    { contentType: 'image/jpeg', customMetadata: { authorId: 'citizen-1', reportId: 'report-citizen-1' } },
   ));
+  await assertFails(uploadBytes(
+    ref(ownerStorage, 'reportPhotos/citizen-1/report-citizen-1/original'),
+    image,
+    { contentType: 'image/jpeg', customMetadata: { authorId: 'citizen-1', reportId: 'report-citizen-1' } },
+  ));
+  await assertFails(uploadBytes(
+    ref(ownerStorage, 'reportPhotos/citizen-1/report-citizen-2/original'),
+    image,
+    { contentType: 'image/svg+xml', customMetadata: { authorId: 'citizen-1', reportId: 'report-citizen-2' } },
+  ));
+  const inactiveStorage = environment.authenticatedContext('inactive-citizen').storage();
+  await assertFails(uploadBytes(
+    ref(inactiveStorage, 'reportPhotos/inactive-citizen/report-citizen-3/original'),
+    image,
+    { contentType: 'image/jpeg', customMetadata: { authorId: 'inactive-citizen', reportId: 'report-citizen-3' } },
+  ));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), 'access', 'citizen-1'), { active: false });
+  });
+  await assertFails(getBytes(ownerPhoto));
 });

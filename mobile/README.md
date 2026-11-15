@@ -15,9 +15,9 @@ La ruta `/` presenta la portada pública; `/overview` conserva el inicio interno
 En PowerShell:
 
 ```powershell
-cd mobile
-npm ci
-npm run web
+   cd mobile
+   npm ci
+   npm run web
 ```
 
 La aplicación de desarrollo queda disponible en la URL que informa Expo. Para compilar y probar la versión estática:
@@ -31,19 +31,49 @@ El export queda en `mobile/dist/`. La carpeta `mobile/public/` se copia al expor
 
 ## Firebase y emuladores
 
-1. Copiar `mobile/.env.example` como `mobile/.env` y completar las variables `EXPO_PUBLIC_FIREBASE_*` con la aplicación web del proyecto Firebase. No incluir claves administrativas, contraseñas ni `MAP_KEY` en estas variables.
-2. Desde la raíz, iniciar Auth, Firestore, Functions y Storage Emulator:
+1. Registrar una aplicación web en Firebase y copiar `mobile/.env.example` a `mobile/.env`. Completar `EXPO_PUBLIC_FIREBASE_API_KEY`, `AUTH_DOMAIN`, `PROJECT_ID`, `STORAGE_BUCKET`, `MESSAGING_SENDER_ID` y `APP_ID` con la configuración pública del SDK web. No son credenciales administrativas. Nunca agregues claves de Admin SDK, contraseñas ni `MAP_KEY` a variables `EXPO_PUBLIC_*`.
+2. Habilitar **Correo electrónico/contraseña** en Firebase Authentication. Es el proveedor utilizado por el registro, el inicio de sesión y la recuperación de contraseña.
+3. Desde `backend/functions`, instalar dependencias e iniciar Auth, Firestore, Functions y Storage Emulator:
 
    ```powershell
+   npm ci
    npx firebase-tools emulators:start --config ..\..\firebase.json --project demo-fireguard
    ```
 
-   Asegurarse de que `EXPO_PUBLIC_FIREBASE_USE_EMULATORS=true` y `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST=127.0.0.1`, y ejecutar la app en otra terminal. El export estático no inicia ni verifica los emuladores.
-3. Las reglas están en `firestore.rules` y `storage.rules`; Functions y configuración de puertos están en `firebase.json`. Las funciones se compilan desde `backend/functions` con `npm install` y `npm run build`.
-4. Desde `backend/functions`, ejecutar `npm run test:rules` para las reglas y `npm run build` seguido de `npm run test:operations` para el flujo Auth → reporte → evaluación → asignación → intervención/cierre. Requiere Firebase Emulator Suite disponible; no son pruebas contra el proyecto real.
-5. El primer administrador técnico debe habilitarse mediante un proceso de bootstrap seguro con Firebase Admin SDK fuera del cliente. Luego puede activar cuentas operativas desde Administración. No hay credenciales de Firebase ni privilegios presembrados en este repositorio.
+   Mantener `EXPO_PUBLIC_FIREBASE_USE_EMULATORS=true` y `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST=127.0.0.1`, e iniciar el frontend en otra terminal (`cd mobile; npm run web`). En dispositivos físicos, configurar el host del emulador con la IP del equipo. El export estático no inicia ni verifica los emuladores.
+4. Las reglas están en `firestore.rules` y `storage.rules`; índices, emuladores y Functions se configuran desde `firebase.json`. En otra terminal, desde `backend/functions`, ejecutar `npm run build`, `npm run test:rules` y `npm run test:operations`.
+5. Para preparar el primer superadministrador, crear primero su cuenta desde la app y obtener su UID. Usar una sesión local confiable de Google Application Default Credentials o `GOOGLE_APPLICATION_CREDENTIALS` apuntando a un archivo fuera del repositorio. Ejecutar primero el modo de inspección:
 
-Sin variables válidas, la interfaz indica que Firebase no está configurado. No se guardan reportes localmente ni se confirma su recepción. Las pruebas con emulador no equivalen a pruebas en el proyecto Firebase real.
+   ```powershell
+   npm run bootstrap:admin -- --project <project-id> --uid <auth-uid>
+   ```
+
+   Solo después de comprobar el proyecto y la cuenta, ejecutar con `--apply --confirm-production`. El script rechaza el bootstrap si ya detecta un administrador técnico, crea un registro de ejecución y no establece contraseñas. No existe una ruta pública de elevación.
+
+6. El cliente crea `access/{uid}` como ciudadano únicamente mediante una callable autenticada, idempotente y que no altera accesos existentes. Los perfiles contienen exactamente `displayName`, `phone`, `createdAt` y `updatedAt`; las cuentas operativas se autorizan desde Functions.
+
+Sin variables válidas, la interfaz indica que Firebase no está configurado. No se guardan reportes localmente ni se confirma su recepción. Los emuladores verifican reglas y operaciones sin escribir en producción; no equivalen a pruebas contra el proyecto Firebase real.
+
+### Migrar datos del esquema anterior
+
+El repositorio contiene código y fixtures del esquema anterior (`ownerUid`, campos adicionales en `users`, fotos bajo `report-images/`), pero no incluye una exportación de datos de producción. Antes de migrar un proyecto, ejecutar el inventario en modo dry-run y revisar cada fallo:
+
+```powershell
+Set-Location backend\functions
+$env:FIREBASE_PROJECT_ID = "<project-id>"
+$env:FIREBASE_STORAGE_BUCKET = "<bucket-del-proyecto>"
+npm run migrate:legacy -- --project $env:FIREBASE_PROJECT_ID
+```
+
+El script requiere credenciales Admin locales para consultar Firestore y Storage. Con `--apply`, guarda el documento completo anterior en `migrationArchive/legacy-v1`, normaliza reportes/perfiles y copia fotos a `reportPhotos/{uid}/{reportId}/original`; nunca elimina el documento archivado ni la foto de origen. La escritura a un proyecto real requiere además `--confirm-production`. La migración no crea ni amplía `access/{uid}`: tras revisar el inventario, las cuentas deberán activarse mediante el flujo administrativo. Ejecuta primero sobre una copia o emulador y conserva el resultado del dry-run.
+
+Si una subida de foto termina pero la creación del reporte falla, conserva la misma clave de reporte y reintenta: el cliente reutiliza la foto privada ya subida y la callable es idempotente. Para limpiar solo objetos huérfanos con más de siete días, inspecciona primero y revisa la lista de rutas:
+
+```powershell
+npm run cleanup:orphan-photos -- --project <project-id>
+```
+
+La eliminación requiere `--apply` (y `--confirm-production` en un proyecto real). El script no elimina archivos recientes ni fotos cuyo reporte exista, y no borra el origen de una migración.
 
 ## Roles y flujo operativo
 
@@ -54,9 +84,11 @@ Sin variables válidas, la interfaz indica que Firebase no está configurado. No
 - Mando operativo: revisa, asigna y dirige incidentes de sus áreas; las transferencias registran autor y motivo.
 - Administrador técnico: activa cuentas operativas autorizadas y administra permisos técnicos. No adquiere mando automáticamente.
 
-El backend valida cada operación callable y las reglas de Firestore/Storage bloquean escrituras directas desde el cliente. Los incidentes y eventos operativos solo son visibles para ciudadanía vinculada y personal autorizado. La asignación no significa desplazamiento; cada transición se registra aparte. La UI permite crear un incidente desde una evaluación y vincular otros reportes a incidentes abiertos.
+El backend valida cada operación callable y las reglas de Firestore/Storage bloquean escrituras directas desde el cliente. Las bandejas operativas se consultan mediante endpoints autorizados con paginación; la bitácora usa `incidents/{incidentId}/logs` y exige acceso activo. Las fotografías ciudadanas no tienen URLs públicas y solo su propietaria puede leerlas directamente. La asignación no significa desplazamiento; cada transición se registra aparte.
 
-La primera versión implementa una brigada e integrante asignados por operación. La asignación simultánea de varias brigadas, la administración CRUD de organizaciones/brigadas y las notificaciones push quedan pendientes. El backend admite activar cuentas contra brigadas previamente configuradas y actualizar disponibilidad; todavía no crea ni edita organizaciones, brigadas o sus integrantes.
+La callable de fotografía emite URLs firmadas válidas por cinco minutos para personal autorizado. Storage Emulator no puede firmarlas sin credenciales de firma, así que las pruebas locales verifican el rechazo de acceso no autorizado, no la emisión de una URL válida. Antes de habilitar esta función en un proyecto real, configura el permiso de firma del servicio de Functions y comprueba la callable en ese proyecto; no se ha probado ni desplegado en producción.
+
+La primera versión implementa una brigada e integrante asignados por operación. La administración CRUD de organizaciones/brigadas, la gestión completa de invitaciones, las notificaciones push y el despliegue de datos satelitales a Firestore aún requieren configuración y/o implementación adicional; no se habilitan lecturas generales para suplirlas.
 
 ## Preparar los datos reales
 
@@ -88,6 +120,14 @@ Ejecuta los comandos de esta sección desde la raíz del repositorio:
    ```
 
    Repetir cada opción de sensor solo para los archivos que existan. Los archivos se combinan por sensor, las duplicaciones idénticas se reportan y eliminan, y las claves duplicadas con atributos contradictorios detienen el proceso. El JSON se escribe en `mobile/public/data/fire-calendar.json`. Revisar sus metadatos y métricas antes de publicar.
+5. Desde `backend/functions`, revisar primero la importación sin escrituras. Para aplicar el resultado solo al emulador:
+
+   ```powershell
+   npx firebase-tools emulators:exec --config ..\..\firebase.json --project demo-fireguard --only firestore "node scripts/import-satellite-results.mjs --project demo-fireguard"
+   npx firebase-tools emulators:exec --config ..\..\firebase.json --project demo-fireguard --only firestore "node scripts/import-satellite-results.mjs --project demo-fireguard --apply"
+   ```
+
+   El importador genera IDs SHA-256 estables para las detecciones, escribe agregados mensuales y cobertura, y registra el mismo identificador en `satelliteImports` y `harmonizationRuns`. Las consultas públicas del mapa se limitan a un mes y una versión de importación, paginadas en lotes de hasta 500. Los registros de importaciones anteriores no se eliminan. Para producción, configurar las credenciales Admin localmente, repetir el dry-run con el ID real y, solo tras revisarlo, ejecutar con `--apply --confirm-production`. Un estado pendiente no crea conteos ni detecciones ficticias.
 
 ## Verificación
 
