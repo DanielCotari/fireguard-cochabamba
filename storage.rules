@@ -1,0 +1,26 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function activeAccount(uid) {
+      return signedIn()
+        && firestore.get(/databases/(default)/documents/access/$(uid)).data.active == true;
+    }
+
+    match /reportPhotos/{uid}/{reportId}/original {
+      allow create: if activeAccount(uid)
+        && request.auth.uid == uid
+        && resource == null
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)')
+        && request.resource.metadata.authorId == uid
+        && request.resource.metadata.reportId == reportId;
+      allow get: if activeAccount(uid) && request.auth.uid == uid;
+      allow update, delete, list: if false;
+    }
+  }
+}
